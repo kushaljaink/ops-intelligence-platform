@@ -10,10 +10,17 @@ type Incident = {
   created_at: string
 }
 
+type AnalysisState = {
+  loading: boolean
+  result: string | null
+  error: string | null
+}
+
 export default function Home() {
   const [incidents, setIncidents] = useState<Incident[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [analyses, setAnalyses] = useState<Record<string, AnalysisState>>({})
 
   useEffect(() => {
     fetch('/api/incidents')
@@ -30,6 +37,19 @@ export default function Home() {
         setLoading(false)
       })
   }, [])
+
+  const analyzeIncident = async (id: string) => {
+    setAnalyses(prev => ({ ...prev, [id]: { loading: true, result: null, error: null } }))
+    try {
+      const r = await fetch(`http://localhost:8000/analyze-incident/${id}`, { method: 'POST' })
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const d = await r.json()
+      setAnalyses(prev => ({ ...prev, [id]: { loading: false, result: d.analysis, error: null } }))
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      setAnalyses(prev => ({ ...prev, [id]: { loading: false, result: null, error: message } }))
+    }
+  }
 
   const severityColor = (severity: string) => {
     if (severity === 'high') return 'bg-red-500/20 text-red-400 border border-red-500/30'
@@ -79,21 +99,56 @@ export default function Home() {
             <p className="text-red-400">Failed to load incidents: {error}</p>
           ) : (
             <div className="space-y-4">
-              {incidents.map(incident => (
-                <div key={incident.id} className="bg-gray-900 rounded-xl p-6 border border-gray-800">
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="font-semibold text-lg">{stageLabel(incident.stage)}</h3>
-                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${severityColor(incident.severity)}`}>
-                      {incident.severity.toUpperCase()}
-                    </span>
+              {incidents.map(incident => {
+                const analysis = analyses[incident.id]
+                return (
+                  <div key={incident.id} className="bg-gray-900 rounded-xl p-6 border border-gray-800">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="font-semibold text-lg">{stageLabel(incident.stage)}</h3>
+                      <span className={`px-3 py-1 rounded-full text-xs font-medium ${severityColor(incident.severity)}`}>
+                        {incident.severity.toUpperCase()}
+                      </span>
+                    </div>
+                    <p className="text-gray-400 text-sm mb-3">{incident.description}</p>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-4 text-xs text-gray-500">
+                        <span>Status: <span className="text-yellow-400">{incident.status}</span></span>
+                        <span>Detected: {new Date(incident.created_at).toLocaleString()}</span>
+                      </div>
+                      <button
+                        onClick={() => analyzeIncident(incident.id)}
+                        disabled={analysis?.loading}
+                        className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {analysis?.loading ? (
+                          <>
+                            <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                            </svg>
+                            Analyzing…
+                          </>
+                        ) : (
+                          'Analyze with AI'
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Analysis result */}
+                    {analysis?.error && (
+                      <div className="mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+                        Error: {analysis.error}
+                      </div>
+                    )}
+                    {analysis?.result && (
+                      <div className="mt-4 p-4 rounded-lg bg-indigo-500/10 border border-indigo-500/20">
+                        <p className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-2">AI Analysis</p>
+                        <p className="text-gray-300 text-sm whitespace-pre-wrap leading-relaxed">{analysis.result}</p>
+                      </div>
+                    )}
                   </div>
-                  <p className="text-gray-400 text-sm mb-3">{incident.description}</p>
-                  <div className="flex items-center gap-4 text-xs text-gray-500">
-                    <span>Status: <span className="text-yellow-400">{incident.status}</span></span>
-                    <span>Detected: {new Date(incident.created_at).toLocaleString()}</span>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
