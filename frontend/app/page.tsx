@@ -16,14 +16,49 @@ type AnalysisState = {
   error: string | null
 }
 
+type WorkflowRow = {
+  stage: string
+  queue_size: string
+  processing_time_seconds: string
+  throughput: string
+}
+
+type CustomResult = {
+  detected_issues: { stage: string; issues: string[] }[]
+  ai_analysis: string
+} | null
+
+const BACKEND = 'https://ops-intelligence-platform.onrender.com'
+
+const CSV_TEMPLATE = `stage,queue_size,processing_time_seconds,throughput
+baggage_drop,12,45,120
+security_screening,67,380,8
+biometric_checkin,5,30,200
+boarding,20,60,90`
+
+const emptyRow = (): WorkflowRow => ({
+  stage: '',
+  queue_size: '',
+  processing_time_seconds: '',
+  throughput: '',
+})
+
 export default function Home() {
   const [incidents, setIncidents] = useState<Incident[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [analyses, setAnalyses] = useState<Record<string, AnalysisState>>({})
 
+  // Custom analysis state
+  const [inputMode, setInputMode] = useState<'form' | 'csv'>('form')
+  const [formRows, setFormRows] = useState<WorkflowRow[]>([emptyRow()])
+  const [csvText, setCsvText] = useState('')
+  const [customLoading, setCustomLoading] = useState(false)
+  const [customResult, setCustomResult] = useState<CustomResult>(null)
+  const [customError, setCustomError] = useState<string | null>(null)
+
   useEffect(() => {
-    fetch('https://ops-intelligence-platform.onrender.com/incidents')
+    fetch(`${BACKEND}/incidents`)
       .then(r => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         return r.json()
@@ -41,7 +76,7 @@ export default function Home() {
   const analyzeIncident = async (id: string) => {
     setAnalyses(prev => ({ ...prev, [id]: { loading: true, result: null, error: null } }))
     try {
-      const r = await fetch(`https://ops-intelligence-platform.onrender.com/analyze-incident/${id}`, { method: 'POST' })
+      const r = await fetch(`${BACKEND}/analyze-incident/${id}`, { method: 'POST' })
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       const d = await r.json()
       setAnalyses(prev => ({ ...prev, [id]: { loading: false, result: d.ai_analysis, error: null } }))
@@ -51,20 +86,76 @@ export default function Home() {
     }
   }
 
+  const updateRow = (index: number, field: keyof WorkflowRow, value: string) => {
+    setFormRows(prev => prev.map((r, i) => i === index ? { ...r, [field]: value } : r))
+  }
+
+  const addRow = () => setFormRows(prev => [...prev, emptyRow()])
+  const removeRow = (index: number) => setFormRows(prev => prev.filter((_, i) => i !== index))
+
+  const parseRows = (): WorkflowRow[] | null => {
+    if (inputMode === 'form') return formRows
+    const lines = csvText.trim().split('\n').filter(Boolean)
+    if (lines.length < 2) return null
+    return lines.slice(1).map(line => {
+      const [stage, queue_size, processing_time_seconds, throughput] = line.split(',')
+      return { stage: stage?.trim() ?? '', queue_size: queue_size?.trim() ?? '', processing_time_seconds: processing_time_seconds?.trim() ?? '', throughput: throughput?.trim() ?? '' }
+    })
+  }
+
+  const analyzeCustom = async () => {
+    const rows = parseRows()
+    if (!rows || rows.length === 0) { setCustomError('No data to analyze.'); return }
+    setCustomLoading(true)
+    setCustomResult(null)
+    setCustomError(null)
+    try {
+      const payload = {
+        rows: rows.map(r => ({
+          stage: r.stage,
+          queue_size: parseFloat(r.queue_size) || 0,
+          processing_time_seconds: parseFloat(r.processing_time_seconds) || 0,
+          throughput: parseFloat(r.throughput) || 0,
+        }))
+      }
+      const r = await fetch(`${BACKEND}/analyze-custom`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      setCustomResult(await r.json())
+    } catch (err: unknown) {
+      setCustomError(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setCustomLoading(false)
+    }
+  }
+
+  const downloadTemplate = () => {
+    const blob = new Blob([CSV_TEMPLATE], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'workflow_template.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   const severityColor = (severity: string) => {
     if (severity === 'high') return 'bg-red-500/20 text-red-400 border border-red-500/30'
     if (severity === 'medium') return 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
     return 'bg-green-500/20 text-green-400 border border-green-500/30'
   }
 
-  const stageLabel = (stage: string) => {
-    return stage.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
-  }
+  const stageLabel = (stage: string) =>
+    stage.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
 
   return (
     <main className="min-h-screen bg-gray-950 text-white p-8">
-      {/* Header */}
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-7xl mx-auto">
+
+        {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-2">Ops Intelligence Platform</h1>
           <p className="text-gray-400">CruiseOps AI — Live incident monitoring</p>
@@ -90,67 +181,219 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Incidents list */}
-        <div>
-          <h2 className="text-lg font-semibold mb-4">Active Incidents</h2>
-          {loading ? (
-            <p className="text-gray-400">Loading incidents...</p>
-          ) : error ? (
-            <p className="text-red-400">Failed to load incidents: {error}</p>
-          ) : (
-            <div className="space-y-4">
-              {incidents.map(incident => {
-                const analysis = analyses[incident.id]
-                return (
-                  <div key={incident.id} className="bg-gray-900 rounded-xl p-6 border border-gray-800">
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="font-semibold text-lg">{stageLabel(incident.stage)}</h3>
-                      <span className={`px-3 py-1 rounded-full text-xs font-medium ${severityColor(incident.severity)}`}>
-                        {incident.severity.toUpperCase()}
-                      </span>
-                    </div>
-                    <p className="text-gray-400 text-sm mb-3">{incident.description}</p>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-4 text-xs text-gray-500">
-                        <span>Status: <span className="text-yellow-400">{incident.status}</span></span>
-                        <span>Detected: {new Date(incident.created_at).toLocaleString()}</span>
-                      </div>
-                      <button
-                        onClick={() => analyzeIncident(incident.id)}
-                        disabled={analysis?.loading}
-                        className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                      >
-                        {analysis?.loading ? (
-                          <>
-                            <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                            </svg>
-                            Analyzing…
-                          </>
-                        ) : (
-                          'Analyze with AI'
-                        )}
-                      </button>
-                    </div>
+        {/* Two-column layout */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
 
-                    {/* Analysis result */}
-                    {analysis?.error && (
-                      <div className="mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
-                        Error: {analysis.error}
+          {/* LEFT — Active Incidents */}
+          <div>
+            <h2 className="text-lg font-semibold mb-4">Active Incidents</h2>
+            {loading ? (
+              <p className="text-gray-400">Loading incidents...</p>
+            ) : error ? (
+              <p className="text-red-400">Failed to load incidents: {error}</p>
+            ) : (
+              <div className="space-y-4">
+                {incidents.map(incident => {
+                  const analysis = analyses[incident.id]
+                  return (
+                    <div key={incident.id} className="bg-gray-900 rounded-xl p-6 border border-gray-800">
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="font-semibold text-lg">{stageLabel(incident.stage)}</h3>
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${severityColor(incident.severity)}`}>
+                          {incident.severity.toUpperCase()}
+                        </span>
                       </div>
-                    )}
-                    {analysis?.result && (
-                      <div className="mt-4 p-4 rounded-lg bg-indigo-500/10 border border-indigo-500/20">
-                        <p className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-2">AI Analysis</p>
-                        <p className="text-gray-300 text-sm whitespace-pre-wrap leading-relaxed">{analysis.result}</p>
+                      <p className="text-gray-400 text-sm mb-3">{incident.description}</p>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-4 text-xs text-gray-500">
+                          <span>Status: <span className="text-yellow-400">{incident.status}</span></span>
+                          <span>Detected: {new Date(incident.created_at).toLocaleString()}</span>
+                        </div>
+                        <button
+                          onClick={() => analyzeIncident(incident.id)}
+                          disabled={analysis?.loading}
+                          className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          {analysis?.loading ? (
+                            <>
+                              <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                              </svg>
+                              Analyzing…
+                            </>
+                          ) : 'Analyze with AI'}
+                        </button>
                       </div>
-                    )}
+                      {analysis?.error && (
+                        <div className="mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+                          Error: {analysis.error}
+                        </div>
+                      )}
+                      {analysis?.result && (
+                        <div className="mt-4 p-4 rounded-lg bg-indigo-500/10 border border-indigo-500/20">
+                          <p className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-2">AI Analysis</p>
+                          <p className="text-gray-300 text-sm whitespace-pre-wrap leading-relaxed">{analysis.result}</p>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* RIGHT — Try With Your Data */}
+          <div>
+            <h2 className="text-lg font-semibold mb-4">Try With Your Data</h2>
+            <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
+
+              {/* Mode toggle */}
+              <div className="flex rounded-lg bg-gray-800 p-1 mb-6 w-fit">
+                {(['form', 'csv'] as const).map(mode => (
+                  <button
+                    key={mode}
+                    onClick={() => { setInputMode(mode); setCustomResult(null); setCustomError(null) }}
+                    className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                      inputMode === mode ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    {mode === 'form' ? 'Simple Form' : 'Paste CSV'}
+                  </button>
+                ))}
+              </div>
+
+              {/* Simple Form */}
+              {inputMode === 'form' && (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-4 gap-2 text-xs text-gray-500 px-1">
+                    <span>Stage</span>
+                    <span>Queue size</span>
+                    <span>Proc. time (s)</span>
+                    <span>Throughput/hr</span>
                   </div>
-                )
-              })}
+                  {formRows.map((row, i) => (
+                    <div key={i} className="grid grid-cols-4 gap-2 items-center">
+                      <input
+                        value={row.stage}
+                        onChange={e => updateRow(i, 'stage', e.target.value)}
+                        placeholder="e.g. security"
+                        className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                      />
+                      <input
+                        type="number"
+                        value={row.queue_size}
+                        onChange={e => updateRow(i, 'queue_size', e.target.value)}
+                        placeholder="0"
+                        className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                      />
+                      <input
+                        type="number"
+                        value={row.processing_time_seconds}
+                        onChange={e => updateRow(i, 'processing_time_seconds', e.target.value)}
+                        placeholder="0"
+                        className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                      />
+                      <div className="flex gap-2">
+                        <input
+                          type="number"
+                          value={row.throughput}
+                          onChange={e => updateRow(i, 'throughput', e.target.value)}
+                          placeholder="0"
+                          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500 w-full"
+                        />
+                        {formRows.length > 1 && (
+                          <button
+                            onClick={() => removeRow(i)}
+                            className="text-gray-600 hover:text-red-400 transition-colors text-lg leading-none"
+                          >×</button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  <button
+                    onClick={addRow}
+                    className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors mt-1"
+                  >
+                    + Add stage
+                  </button>
+                </div>
+              )}
+
+              {/* CSV mode */}
+              {inputMode === 'csv' && (
+                <div className="space-y-3">
+                  <p className="text-xs text-gray-500">
+                    Format: <code className="text-gray-400">stage, queue_size, processing_time_seconds, throughput</code>
+                  </p>
+                  <textarea
+                    value={csvText}
+                    onChange={e => setCsvText(e.target.value)}
+                    placeholder={`stage,queue_size,processing_time_seconds,throughput\nbaggage_drop,12,45,120\nsecurity,67,380,8`}
+                    rows={7}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 font-mono focus:outline-none focus:border-indigo-500 resize-none"
+                  />
+                  <button
+                    onClick={downloadTemplate}
+                    className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                  >
+                    Download template CSV
+                  </button>
+                </div>
+              )}
+
+              {/* Analyze button */}
+              <button
+                onClick={analyzeCustom}
+                disabled={customLoading}
+                className="mt-5 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {customLoading ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                    </svg>
+                    Analyzing…
+                  </>
+                ) : 'Analyze My Data'}
+              </button>
+
+              {/* Custom result */}
+              {customError && (
+                <div className="mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+                  Error: {customError}
+                </div>
+              )}
+              {customResult && (
+                <div className="mt-4 space-y-4">
+                  {customResult.detected_issues.length > 0 && (
+                    <div className="p-4 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+                      <p className="text-xs font-semibold text-yellow-400 uppercase tracking-wider mb-2">Detected Issues</p>
+                      <ul className="space-y-1">
+                        {customResult.detected_issues.map((item, i) => (
+                          <li key={i} className="text-sm text-yellow-300">
+                            <span className="font-medium">{stageLabel(item.stage)}:</span>{' '}
+                            <span className="text-yellow-400/80">{item.issues.join(', ')}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {customResult.detected_issues.length === 0 && (
+                    <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-sm">
+                      No threshold violations detected across all stages.
+                    </div>
+                  )}
+                  <div className="p-4 rounded-lg bg-indigo-500/10 border border-indigo-500/20">
+                    <p className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-2">AI Recommendations</p>
+                    <p className="text-gray-300 text-sm whitespace-pre-wrap leading-relaxed">{customResult.ai_analysis}</p>
+                  </div>
+                </div>
+              )}
             </div>
-          )}
+          </div>
+
         </div>
       </div>
     </main>
