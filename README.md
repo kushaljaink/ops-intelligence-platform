@@ -1,6 +1,6 @@
 # Ops Intelligence Platform
 
-AI-powered incident monitoring and diagnosis platform for operations teams.
+AI-powered early warning and decision support system for operations teams.
 
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Vercel-black?style=for-the-badge&logo=vercel)](https://ops-intelligence-platform.vercel.app)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
@@ -18,27 +18,85 @@ AI-powered incident monitoring and diagnosis platform for operations teams.
 
 ---
 
-## Note on free tier hosting
+## The Problem
 
-This project runs entirely on free-tier infrastructure — here's what to expect:
+Large-scale operations — cruise embarkation, airport security, healthcare admissions, warehouse fulfilment, bank branch workflows — run across many interconnected systems. Thousands of people move through these systems every day, and keeping them moving smoothly depends on dozens of processes working in sync.
 
-- **Vercel (frontend)** — Always on. Loads instantly.
-- **Render (backend)** — Spins down after inactivity. The first request after a cold start takes **30–50 seconds** to respond; subsequent requests are fast.
-- **Supabase (database)** — Stays active as long as the project is accessed occasionally. No cold start.
+When something breaks, it rarely announces itself. A queue backs up. A processing step slows down. Throughput drops. By the time anyone notices, there is already a delay. And with delay comes customer impact, revenue loss, and employees scrambling to fix something that could have been caught ten minutes earlier.
 
-> **Tip for reviewers:** Before sharing or demoing, visit [https://ops-intelligence-platform.onrender.com/health](https://ops-intelligence-platform.onrender.com/health) to wake the backend up. Once it returns `{"status":"ok"}`, the app is fully live.
+The core challenge is not that teams lack data. Most operations are surrounded by data. The challenge is that no single system connects the dots fast enough to matter. Dashboards show what has already happened. Alerts fire after thresholds are already crossed. Teams work in separate tools — one for monitoring, one for ticketing, one for communication — and spend more time coordinating than fixing.
+
+The result: operations teams are permanently reactive. They fight fires instead of preventing them.
 
 ---
 
-## What it does
+## How companies handle it today
 
-Ops Intelligence Platform gives operations teams an edge by turning raw incident data into actionable intelligence — fast.
+Most operations platforms fall into one of four categories:
 
-- **Early warning** — Continuously surfaces open and high-severity incidents from your data pipeline so on-call engineers see what matters immediately, without digging through logs.
-- **Instant diagnosis** — Each incident card shows severity, status, affected service, and a human-readable description so teams can triage at a glance.
-- **AI-powered recommendations** — A single click runs the incident through a locally-hosted LLM (llama3.2 via Ollama) that returns a root cause analysis and concrete remediation steps in seconds, directly on the incident card.
+- **Workflow tools** (ServiceNow, Jira, Monday) — track tasks and tickets after a problem is reported
+- **Dashboards** (Grafana, Datadog, Tableau) — visualise what is happening right now, but require a human to interpret it
+- **Alerting systems** (PagerDuty, OpsGenie) — notify teams when a pre-defined threshold is crossed, but only after the fact
+- **AI copilots** (ChatGPT, Copilot integrations) — answer questions when asked, but don't watch your systems or act proactively
 
-Built for teams that need fast answers during an outage, not a ticket queue.
+Each of these is useful. None of them does the full job.
+
+What they do not do is automatically detect that something is going wrong across multiple steps of a workflow, explain why it is likely happening, and tell the team what to do about it — all before the problem reaches the customer.
+
+That gap is where this project sits.
+
+---
+
+## The Solution
+
+**Ops Intelligence Platform** is an early warning and decision support system for operations teams. It watches workflow signals, detects anomalies, creates incident records, and gives teams an AI-generated diagnosis and recommended action — without anyone having to ask.
+
+The demo use case is **CruiseOps AI**: a simulated cruise terminal where passengers move through a pipeline of stages — baggage drop, security screening, biometric check-in, and boarding. Each stage can develop bottlenecks, failures, or delays. The platform monitors the entire pipeline and surfaces problems the moment they emerge.
+
+This is not a chatbot. It is not just a dashboard. It is not just an alert.
+
+It does four things together:
+
+1. **Detection** — identifies when a workflow stage is behaving abnormally
+2. **Diagnosis** — explains the likely cause using an AI model with full incident context
+3. **Recommendation** — suggests concrete next actions for the operations team
+4. **Follow-up** — records the incident and any workflow events for audit and learning
+
+---
+
+## How it works
+
+The platform is built around a simple but powerful loop:
+
+**1. Signals are monitored**
+Workflow metrics — queue sizes, processing times, throughput rates — are tracked across each stage of the operation. In the demo, this covers the full cruise embarkation pipeline from arrival to boarding.
+
+**2. A rules engine detects bottlenecks**
+When a metric crosses a defined threshold, the system creates an incident record automatically. No human needs to spot it first. Each incident captures the affected stage, severity level, current status, and a plain-language description of what was detected.
+
+**3. AI diagnoses the incident**
+When an operator clicks "Analyze with AI", the incident details are sent to a locally-hosted LLM (llama3.2 via Ollama). The model reads the full incident context — stage, severity, description, service — and returns a structured analysis: what likely caused this, and what the team should do next.
+
+**4. The dashboard surfaces everything in one place**
+Active incidents are shown with severity badges, status, detection time, and one-click AI analysis. There is no need to jump between tools. The on-call engineer sees the problem, the context, and the recommended action on a single screen.
+
+---
+
+## Why this is different
+
+Here is the typical operations workflow today:
+
+> Monitor dashboards → someone spots something wrong → investigate across multiple tools → message the right team → wait for them to assess → decide what to do
+
+Every step in that chain takes time. Each handoff introduces delay. By the time the team is aligned on what to do, the problem has already cascaded.
+
+Here is how this platform changes that:
+
+> System detects abnormal behavior → incident record created automatically → AI pulls together the context → diagnosis and recommended action delivered in seconds → team acts immediately
+
+The difference is not just speed. It is the removal of the ambiguous middle steps where things fall through the cracks: the analyst who did not notice the graph drift, the alert that went to the wrong channel, the on-call engineer who spent twenty minutes investigating before finding the right data.
+
+This platform reduces time-to-notice, time-to-triage, and time-to-coordinate — the three biggest contributors to operational downtime.
 
 ---
 
@@ -53,6 +111,18 @@ Built for teams that need fast answers during an outage, not a ticket queue.
 | AI inference | Ollama · llama3.2 |
 | Frontend hosting | Vercel |
 | Backend hosting | Render |
+
+---
+
+## Note on free tier hosting
+
+This project runs entirely on free-tier infrastructure — here is what to expect:
+
+- **Vercel (frontend)** — Always on. Loads instantly.
+- **Render (backend)** — Spins down after inactivity. The first request after a cold start takes **30–50 seconds** to respond; subsequent requests are fast.
+- **Supabase (database)** — Stays active as long as the project is accessed occasionally. No cold start.
+
+> **Tip for reviewers:** Before sharing or demoing, visit [https://ops-intelligence-platform.onrender.com/health](https://ops-intelligence-platform.onrender.com/health) to wake the backend up. Once it returns `{"status":"ok"}`, the app is fully live.
 
 ---
 
@@ -74,7 +144,7 @@ Built for teams that need fast answers during an outage, not a ticket queue.
 ### 1. Clone the repo
 
 ```bash
-git clone https://github.com/your-username/ops-intelligence-platform.git
+git clone https://github.com/kushaljaink/ops-intelligence-platform.git
 cd ops-intelligence-platform
 ```
 
