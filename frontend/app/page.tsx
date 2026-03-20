@@ -44,7 +44,7 @@ export default function Home() {
       const r = await fetch(`https://ops-intelligence-platform.onrender.com/analyze-incident/${id}`, { method: 'POST' })
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       const d = await r.json()
-      setAnalyses(prev => ({ ...prev, [id]: { loading: false, result: d.analysis, error: null } }))
+      setAnalyses(prev => ({ ...prev, [id]: { loading: false, result: d.ai_analysis, error: null } }))
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error'
       setAnalyses(prev => ({ ...prev, [id]: { loading: false, result: null, error: message } }))
