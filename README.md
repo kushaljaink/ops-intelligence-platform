@@ -121,3 +121,28 @@ The app will be available at `http://localhost:3000`.
 > **Note:** By default the frontend points to the production backend on Render. To use your local backend, update the fetch URLs in `frontend/app/page.tsx` to `http://localhost:8000`.
 
 ---
+
+## Resume bullet points
+
+- Built a full-stack AI operations platform using **FastAPI**, **Next.js**, and **Supabase**, deployed on **Vercel** and **Render**
+- Integrated **Ollama (llama3.2)** to generate real-time root cause analysis and remediation recommendations for production incidents
+- Designed a **pgvector**-backed Supabase schema for incident storage and semantic search across operational events
+- Implemented a responsive dark-theme dashboard surfacing live incident severity, status, and AI analysis with zero page reloads
+
+---
+
+## Maintenance Notes
+
+### Weekly checklist (2 minutes)
+- Visit [supabase.com](https://supabase.com) and open the project dashboard to keep the free tier active (pauses after 7 days of inactivity)
+- Visit [https://ops-intelligence-platform.onrender.com/health](https://ops-intelligence-platform.onrender.com/health) to wake up the backend
+
+### Before sharing with a recruiter (30 seconds)
+1. Visit [https://ops-intelligence-platform.onrender.com/health](https://ops-intelligence-platform.onrender.com/health) and wait for `{"status":"ok"}`
+2. Visit [https://ops-intelligence-platform.vercel.app](https://ops-intelligence-platform.vercel.app) and confirm incidents load
+3. Then share the links
+
+### What stays on automatically
+- **Vercel frontend** — always on, no action needed
+- **Supabase database** — stays active with weekly login
+- **Render backend** — spins down after 15 min inactivity, wakes up on first request (30–50 sec delay)
