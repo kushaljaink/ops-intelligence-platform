@@ -18,6 +18,18 @@ AI-powered incident monitoring and diagnosis platform for operations teams.
 
 ---
 
+## Note on free tier hosting
+
+This project runs entirely on free-tier infrastructure — here's what to expect:
+
+- **Vercel (frontend)** — Always on. Loads instantly.
+- **Render (backend)** — Spins down after inactivity. The first request after a cold start takes **30–50 seconds** to respond; subsequent requests are fast.
+- **Supabase (database)** — Stays active as long as the project is accessed occasionally. No cold start.
+
+> **Tip for recruiters / reviewers:** Before sharing or demoing, visit [https://ops-intelligence-platform.onrender.com/health](https://ops-intelligence-platform.onrender.com/health) to wake the backend up. Once it returns `{"status":"ok"}`, the app is fully live.
+
+---
+
 ## What it does
 
 Ops Intelligence Platform gives operations teams an edge by turning raw incident data into actionable intelligence — fast.
