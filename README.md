@@ -97,10 +97,3 @@ The app will be available at `http://localhost:3000`.
 > **Note:** By default the frontend points to the production backend on Render. To use your local backend, update the fetch URLs in `frontend/app/page.tsx` to `http://localhost:8000`.
 
 ---
-
-## Resume bullet points
-
-- Built a full-stack AI operations platform using **FastAPI**, **Next.js**, and **Supabase**, deployed on **Vercel** and **Render**
-- Integrated **Ollama (llama3.2)** to generate real-time root cause analysis and remediation recommendations for production incidents
-- Designed a **pgvector**-backed Supabase schema for incident storage and semantic search across operational events
-- Implemented a responsive dark-theme dashboard surfacing live incident severity, status, and AI analysis with zero page reloads
