@@ -17,6 +17,7 @@ app.add_middleware(
 )
 
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 @app.get("/health")
 def health():
@@ -53,12 +54,21 @@ async def analyze_incident(incident_id: str):
         f"Service: {incident.get('service', 'N/A')}\n"
     )
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        ollama_response = await client.post(
-            "http://localhost:11434/api/generate",
-            json={"model": "llama3.2", "prompt": prompt, "stream": False},
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        groq_response = await client.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+            json={
+                "model": "llama-3.3-70b-versatile",
+                "messages": [{"role": "user", "content": prompt}],
+            },
         )
-        ollama_response.raise_for_status()
+        groq_response.raise_for_status()
 
-    analysis = ollama_response.json().get("response", "")
-    return {"incident_id": incident_id, "analysis": analysis}
+    analysis = groq_response.json()["choices"][0]["message"]["content"]
+    return {
+        "incident_id": incident_id,
+        "stage": incident.get("stage"),
+        "severity": incident.get("severity"),
+        "ai_analysis": analysis,
+    }
