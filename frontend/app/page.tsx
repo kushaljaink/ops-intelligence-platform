@@ -23,7 +23,7 @@ export default function Home() {
   const [analyses, setAnalyses] = useState<Record<string, AnalysisState>>({})
 
   useEffect(() => {
-    fetch('/api/incidents')
+    fetch('https://ops-intelligence-platform.onrender.com/incidents')
       .then(r => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         return r.json()
