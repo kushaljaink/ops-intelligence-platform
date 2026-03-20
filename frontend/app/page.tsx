@@ -41,7 +41,7 @@ export default function Home() {
   const analyzeIncident = async (id: string) => {
     setAnalyses(prev => ({ ...prev, [id]: { loading: true, result: null, error: null } }))
     try {
-      const r = await fetch(`http://localhost:8000/analyze-incident/${id}`, { method: 'POST' })
+      const r = await fetch(`https://ops-intelligence-platform.onrender.com/analyze-incident/${id}`, { method: 'POST' })
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       const d = await r.json()
       setAnalyses(prev => ({ ...prev, [id]: { loading: false, result: d.analysis, error: null } }))
