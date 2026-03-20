@@ -1,6 +1,8 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from pydantic import BaseModel
+from typing import List
 import os
 import httpx
 from supabase import create_client
@@ -71,4 +73,68 @@ async def analyze_incident(incident_id: str):
         "stage": incident.get("stage"),
         "severity": incident.get("severity"),
         "ai_analysis": analysis,
+    }
+
+
+class WorkflowRow(BaseModel):
+    stage: str
+    queue_size: float
+    processing_time_seconds: float
+    throughput: float
+
+class AnalyzeCustomRequest(BaseModel):
+    rows: List[WorkflowRow]
+
+@app.post("/analyze-custom")
+async def analyze_custom(body: AnalyzeCustomRequest):
+    rows = body.rows
+    if not rows:
+        raise HTTPException(status_code=400, detail="No workflow data provided")
+
+    # Rules engine
+    issues = []
+    for r in rows:
+        row_issues = []
+        if r.queue_size > 50:
+            row_issues.append(f"queue backed up ({r.queue_size} items)")
+        if r.processing_time_seconds > 300:
+            row_issues.append(f"processing time too high ({r.processing_time_seconds}s)")
+        if r.throughput < 10:
+            row_issues.append(f"throughput critically low ({r.throughput}/hr)")
+        if row_issues:
+            issues.append({"stage": r.stage, "issues": row_issues})
+
+    rows_text = "\n".join(
+        f"- Stage: {r.stage} | Queue: {r.queue_size} | Processing time: {r.processing_time_seconds}s | Throughput: {r.throughput}/hr"
+        for r in rows
+    )
+    issues_text = "\n".join(
+        f"- {i['stage']}: {', '.join(i['issues'])}" for i in issues
+    ) if issues else "No threshold violations detected."
+
+    prompt = (
+        "You are an operations analyst. Analyze the following workflow metrics and provide:\n"
+        "1. A brief assessment of the overall operational health\n"
+        "2. Specific bottlenecks or risks identified\n"
+        "3. Concrete recommended actions for the operations team\n\n"
+        f"Workflow data:\n{rows_text}\n\n"
+        f"Rule-based issues detected:\n{issues_text}\n\n"
+        "Be concise and practical. Focus on actionable next steps."
+    )
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        groq_response = await client.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+            json={
+                "model": "llama-3.3-70b-versatile",
+                "messages": [{"role": "user", "content": prompt}],
+            },
+        )
+        groq_response.raise_for_status()
+
+    ai_analysis = groq_response.json()["choices"][0]["message"]["content"]
+    return {
+        "detected_issues": issues,
+        "ai_analysis": ai_analysis,
     }
