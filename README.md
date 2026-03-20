@@ -2,7 +2,19 @@
 
 AI-powered incident monitoring and diagnosis platform for operations teams.
 
-**Live demo:** [https://ops-intelligence-platform.vercel.app](https://ops-intelligence-platform.vercel.app)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Vercel-black?style=for-the-badge&logo=vercel)](https://ops-intelligence-platform.vercel.app)
+[![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![Next.js](https://img.shields.io/badge/Next.js-000000?style=for-the-badge&logo=nextdotjs&logoColor=white)](https://nextjs.org)
+[![Supabase](https://img.shields.io/badge/Supabase-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white)](https://supabase.com)
+[![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+
+---
+
+| | |
+|---|---|
+| **Live App** | [https://ops-intelligence-platform.vercel.app](https://ops-intelligence-platform.vercel.app) |
+| **API Docs** | [https://ops-intelligence-platform.onrender.com/docs](https://ops-intelligence-platform.onrender.com/docs) |
+| **GitHub** | [https://github.com/kushaljaink/ops-intelligence-platform](https://github.com/kushaljaink/ops-intelligence-platform) |
 
 ---
 
