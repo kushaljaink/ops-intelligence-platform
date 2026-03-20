@@ -26,7 +26,7 @@ This project runs entirely on free-tier infrastructure — here's what to expect
 - **Render (backend)** — Spins down after inactivity. The first request after a cold start takes **30–50 seconds** to respond; subsequent requests are fast.
 - **Supabase (database)** — Stays active as long as the project is accessed occasionally. No cold start.
 
-> **Tip for recruiters / reviewers:** Before sharing or demoing, visit [https://ops-intelligence-platform.onrender.com/health](https://ops-intelligence-platform.onrender.com/health) to wake the backend up. Once it returns `{"status":"ok"}`, the app is fully live.
+> **Tip for reviewers:** Before sharing or demoing, visit [https://ops-intelligence-platform.onrender.com/health](https://ops-intelligence-platform.onrender.com/health) to wake the backend up. Once it returns `{"status":"ok"}`, the app is fully live.
 
 ---
 
