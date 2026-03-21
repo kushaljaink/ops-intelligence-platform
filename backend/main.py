@@ -1,11 +1,12 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 import os
 import httpx
 from supabase import create_client
+from datetime import datetime, timezone
 
 load_dotenv()
 
@@ -20,6 +21,9 @@ app.add_middleware(
 
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+ALERT_EMAIL = os.getenv("ALERT_EMAIL", "")
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 
 INDUSTRY_THRESHOLDS = {
     "cruise":     {"queue": 50,  "processing": 300, "throughput": 10},
@@ -29,6 +33,59 @@ INDUSTRY_THRESHOLDS = {
     "airport":    {"queue": 80,  "processing": 240, "throughput": 20},
 }
 
+
+# ─── Groq helper ────────────────────────────────────────────────────────────
+
+async def call_groq(prompt: str) -> str:
+    """Call Groq API and return the text response. Raises friendly errors."""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+            json={
+                "model": "llama-3.3-70b-versatile",
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 500,
+            },
+        )
+        if response.status_code == 429:
+            raise HTTPException(
+                status_code=429,
+                detail="GROQ_RATE_LIMIT: The AI service is temporarily rate limited. Please wait 60 seconds and try again, or add your own Groq API key.",
+            )
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"]
+
+
+# ─── Email helper ────────────────────────────────────────────────────────────
+
+async def send_alert_email(incident: dict):
+    """Send a HIGH severity alert email via Resend."""
+    if not RESEND_API_KEY or not ALERT_EMAIL:
+        return  # Email not configured — skip silently
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        await client.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
+            json={
+                "from": "alerts@ops-intelligence.app",
+                "to": [ALERT_EMAIL],
+                "subject": f"🚨 HIGH Severity Incident: {incident.get('stage', 'Unknown')}",
+                "html": f"""
+                    <h2>High Severity Incident Detected</h2>
+                    <p><strong>Stage:</strong> {incident.get('stage')}</p>
+                    <p><strong>Severity:</strong> {incident.get('severity', '').upper()}</p>
+                    <p><strong>Industry:</strong> {incident.get('industry', 'N/A')}</p>
+                    <p><strong>Description:</strong> {incident.get('description')}</p>
+                    <p><strong>Detected at:</strong> {incident.get('created_at')}</p>
+                    <hr/>
+                    <p><a href="https://ops-intelligence-platform.vercel.app">View Dashboard →</a></p>
+                """,
+            },
+        )
+
+
+# ─── Routes ─────────────────────────────────────────────────────────────────
 
 @app.get("/health")
 def health():
@@ -45,6 +102,71 @@ def get_incidents(industry: str = "cruise"):
         .execute()
     )
     return {"incidents": response.data}
+
+
+@app.get("/incidents/stats")
+def get_stats(industry: str = "cruise"):
+    """Return incident counts for today vs yesterday for trend indicators."""
+    all_resp = (
+        supabase.table("incidents")
+        .select("id, severity, status, created_at")
+        .eq("industry", industry)
+        .execute()
+    )
+    incidents = all_resp.data or []
+
+    now = datetime.now(timezone.utc)
+    today_count = sum(
+        1 for i in incidents
+        if i.get("created_at") and
+        (now - datetime.fromisoformat(i["created_at"].replace("Z", "+00:00"))).days < 1
+    )
+    yesterday_count = sum(
+        1 for i in incidents
+        if i.get("created_at") and
+        1 <= (now - datetime.fromisoformat(i["created_at"].replace("Z", "+00:00"))).days < 2
+    )
+
+    total = len(incidents)
+    high = sum(1 for i in incidents if i.get("severity") == "high")
+    open_count = sum(1 for i in incidents if i.get("status") == "open")
+
+    return {
+        "total": total,
+        "high_severity": high,
+        "open": open_count,
+        "today_count": today_count,
+        "yesterday_count": yesterday_count,
+        "trend": today_count - yesterday_count,
+    }
+
+
+@app.patch("/incidents/{incident_id}/resolve")
+def resolve_incident(incident_id: str):
+    """Mark an incident as resolved."""
+    result = supabase.table("incidents").select("*").eq("id", incident_id).single().execute()
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    supabase.table("incidents").update({
+        "status": "resolved",
+        "resolved_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", incident_id).execute()
+
+    return {"success": True, "incident_id": incident_id, "status": "resolved"}
+
+
+@app.get("/incidents/{incident_id}/analysis-history")
+def get_analysis_history(incident_id: str):
+    """Return all saved AI analyses for an incident."""
+    response = (
+        supabase.table("analysis_logs")
+        .select("*")
+        .eq("incident_id", incident_id)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return {"history": response.data}
 
 
 @app.get("/incidents/{incident_id}/recommendations")
@@ -82,18 +204,19 @@ async def analyze_incident(incident_id: str):
         f"Use {industry}-appropriate language. Be direct, specific, and urgent. No generic advice."
     )
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        groq_response = await client.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-            json={
-                "model": "llama-3.3-70b-versatile",
-                "messages": [{"role": "user", "content": prompt}],
-            },
-        )
-        groq_response.raise_for_status()
+    analysis = await call_groq(prompt)
 
-    analysis = groq_response.json()["choices"][0]["message"]["content"]
+    # Save to audit trail
+    supabase.table("analysis_logs").insert({
+        "incident_id": incident_id,
+        "ai_analysis": analysis,
+        "triggered_by": "user",
+    }).execute()
+
+    # Send email alert for HIGH severity
+    if incident.get("severity") == "high":
+        await send_alert_email(incident)
+
     return {
         "incident_id": incident_id,
         "stage": incident.get("stage"),
@@ -101,6 +224,8 @@ async def analyze_incident(incident_id: str):
         "ai_analysis": analysis,
     }
 
+
+# ─── Custom analysis ─────────────────────────────────────────────────────────
 
 class WorkflowRow(BaseModel):
     stage: str
@@ -157,16 +282,92 @@ async def analyze_custom(body: AnalyzeCustomRequest):
         "Reference actual metric values — no generic advice."
     )
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        groq_response = await client.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-            json={
-                "model": "llama-3.3-70b-versatile",
-                "messages": [{"role": "user", "content": prompt}],
-            },
-        )
-        groq_response.raise_for_status()
-
-    ai_analysis = groq_response.json()["choices"][0]["message"]["content"]
+    ai_analysis = await call_groq(prompt)
     return {"detected_issues": issues, "ai_analysis": ai_analysis}
+
+
+# ─── Webhook endpoint ────────────────────────────────────────────────────────
+
+class WebhookEvent(BaseModel):
+    stage: str
+    queue_size: float
+    processing_time_seconds: float
+    throughput: float
+    industry: str = "operations"
+    source: Optional[str] = "webhook"
+
+
+class WebhookPayload(BaseModel):
+    events: List[WebhookEvent]
+    secret: Optional[str] = None
+
+
+@app.post("/webhook/events")
+async def receive_webhook(payload: WebhookPayload):
+    """
+    Webhook endpoint — companies can POST their live operational data here.
+    Automatically detects incidents and triggers AI analysis on critical ones.
+    """
+    if WEBHOOK_SECRET and payload.secret != WEBHOOK_SECRET:
+        raise HTTPException(status_code=401, detail="Invalid webhook secret")
+
+    created_incidents = []
+    triggered_analyses = []
+
+    for event in payload.events:
+        industry = event.industry
+        thresholds = INDUSTRY_THRESHOLDS.get(industry, {"queue": 50, "processing": 300, "throughput": 10})
+
+        violations = []
+        if event.queue_size > thresholds["queue"]:
+            violations.append(f"Queue size {event.queue_size} exceeds threshold of {thresholds['queue']}")
+        if event.processing_time_seconds > thresholds["processing"]:
+            violations.append(f"Processing time {event.processing_time_seconds}s exceeds threshold of {thresholds['processing']}s")
+        if event.throughput < thresholds["throughput"]:
+            violations.append(f"Throughput {event.throughput}/hr below threshold of {thresholds['throughput']}/hr")
+
+        if violations:
+            severity = "high" if len(violations) >= 2 else "medium"
+            description = ". ".join(violations)
+
+            incident_resp = supabase.table("incidents").insert({
+                "stage": event.stage,
+                "severity": severity,
+                "description": description,
+                "status": "open",
+                "industry": industry,
+            }).execute()
+
+            if incident_resp.data:
+                incident = incident_resp.data[0]
+                created_incidents.append(incident)
+
+                # Auto-analyze HIGH severity incidents
+                if severity == "high":
+                    try:
+                        prompt = (
+                            f"You are a senior operations analyst. A HIGH severity incident was just auto-detected via webhook in a {industry} operation.\n\n"
+                            f"Stage: {event.stage}\n"
+                            f"Queue size: {event.queue_size} (threshold: {thresholds['queue']})\n"
+                            f"Processing time: {event.processing_time_seconds}s (threshold: {thresholds['processing']}s)\n"
+                            f"Throughput: {event.throughput}/hr (threshold: {thresholds['throughput']}/hr)\n"
+                            f"Violations: {description}\n\n"
+                            "Provide immediate root cause analysis and 3 urgent actions for the ops team. Be concise and direct."
+                        )
+                        analysis = await call_groq(prompt)
+                        supabase.table("analysis_logs").insert({
+                            "incident_id": incident["id"],
+                            "ai_analysis": analysis,
+                            "triggered_by": "webhook_auto",
+                        }).execute()
+                        triggered_analyses.append(incident["id"])
+                        await send_alert_email(incident)
+                    except Exception:
+                        pass  # Don't fail the webhook if AI analysis fails
+
+    return {
+        "received": len(payload.events),
+        "incidents_created": len(created_incidents),
+        "auto_analyzed": len(triggered_analyses),
+        "incidents": created_incidents,
+    }
