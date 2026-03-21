@@ -21,24 +21,43 @@ app.add_middleware(
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
+INDUSTRY_THRESHOLDS = {
+    "cruise":     {"queue": 50,  "processing": 300, "throughput": 10},
+    "healthcare": {"queue": 20,  "processing": 120, "throughput": 15},
+    "banking":    {"queue": 100, "processing": 600, "throughput": 5},
+    "ecommerce":  {"queue": 200, "processing": 180, "throughput": 50},
+    "airport":    {"queue": 80,  "processing": 240, "throughput": 20},
+}
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "Ops Intelligence Platform"}
 
+
 @app.get("/incidents")
-def get_incidents():
-    response = supabase.table("incidents").select("*").order("created_at", desc=True).execute()
+def get_incidents(industry: str = "cruise"):
+    response = (
+        supabase.table("incidents")
+        .select("*")
+        .eq("industry", industry)
+        .order("created_at", desc=True)
+        .execute()
+    )
     return {"incidents": response.data}
+
 
 @app.get("/incidents/{incident_id}/recommendations")
 def get_recommendations(incident_id: str):
     response = supabase.table("recommendations").select("*").eq("incident_id", incident_id).execute()
     return {"recommendations": response.data}
 
+
 @app.get("/workflow-events")
 def get_workflow_events():
     response = supabase.table("workflow_events").select("*").order("created_at", desc=True).execute()
     return {"events": response.data}
+
 
 @app.post("/analyze-incident/{incident_id}")
 async def analyze_incident(incident_id: str):
@@ -47,13 +66,20 @@ async def analyze_incident(incident_id: str):
         raise HTTPException(status_code=404, detail="Incident not found")
 
     incident = result.data
+    industry = incident.get("industry", "operations")
+
     prompt = (
-        f"Analyze this operational incident and provide a concise root cause analysis and recommended remediation steps.\n\n"
-        f"Title: {incident.get('title', 'N/A')}\n"
-        f"Severity: {incident.get('severity', 'N/A')}\n"
-        f"Status: {incident.get('status', 'N/A')}\n"
-        f"Description: {incident.get('description', 'N/A')}\n"
-        f"Service: {incident.get('service', 'N/A')}\n"
+        f"You are a senior operations analyst reviewing a live incident in a {industry} operation.\n\n"
+        f"Incident details:\n"
+        f"- Stage: {incident.get('stage', 'N/A')}\n"
+        f"- Severity: {incident.get('severity', 'N/A')}\n"
+        f"- Status: {incident.get('status', 'N/A')}\n"
+        f"- Description: {incident.get('description', 'N/A')}\n\n"
+        "Your job:\n"
+        "1. Identify the root cause based on the description\n"
+        "2. Explain the downstream impact if not addressed immediately\n"
+        "3. Give 3 specific, numbered actions the ops team should take in the next 30 minutes\n\n"
+        f"Use {industry}-appropriate language. Be direct, specific, and urgent. No generic advice."
     )
 
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -82,8 +108,11 @@ class WorkflowRow(BaseModel):
     processing_time_seconds: float
     throughput: float
 
+
 class AnalyzeCustomRequest(BaseModel):
     rows: List[WorkflowRow]
+    industry: str = "operations"
+
 
 @app.post("/analyze-custom")
 async def analyze_custom(body: AnalyzeCustomRequest):
@@ -91,16 +120,20 @@ async def analyze_custom(body: AnalyzeCustomRequest):
     if not rows:
         raise HTTPException(status_code=400, detail="No workflow data provided")
 
-    # Rules engine
+    thresholds = INDUSTRY_THRESHOLDS.get(
+        body.industry,
+        {"queue": 50, "processing": 300, "throughput": 10}
+    )
+
     issues = []
     for r in rows:
         row_issues = []
-        if r.queue_size > 50:
-            row_issues.append(f"queue backed up ({r.queue_size} items)")
-        if r.processing_time_seconds > 300:
-            row_issues.append(f"processing time too high ({r.processing_time_seconds}s)")
-        if r.throughput < 10:
-            row_issues.append(f"throughput critically low ({r.throughput}/hr)")
+        if r.queue_size > thresholds["queue"]:
+            row_issues.append(f"queue backed up ({r.queue_size} items, threshold: {thresholds['queue']})")
+        if r.processing_time_seconds > thresholds["processing"]:
+            row_issues.append(f"processing time too high ({r.processing_time_seconds}s, threshold: {thresholds['processing']}s)")
+        if r.throughput < thresholds["throughput"]:
+            row_issues.append(f"throughput critically low ({r.throughput}/hr, threshold: {thresholds['throughput']}/hr)")
         if row_issues:
             issues.append({"stage": r.stage, "issues": row_issues})
 
@@ -113,13 +146,15 @@ async def analyze_custom(body: AnalyzeCustomRequest):
     ) if issues else "No threshold violations detected."
 
     prompt = (
-        "You are an operations analyst. Analyze the following workflow metrics and provide:\n"
-        "1. A brief assessment of the overall operational health\n"
-        "2. Specific bottlenecks or risks identified\n"
-        "3. Concrete recommended actions for the operations team\n\n"
-        f"Workflow data:\n{rows_text}\n\n"
-        f"Rule-based issues detected:\n{issues_text}\n\n"
-        "Be concise and practical. Focus on actionable next steps."
+        f"You are a senior operations analyst reviewing live workflow metrics for a {body.industry} operation.\n\n"
+        f"Workflow data ({len(rows)} stages):\n{rows_text}\n\n"
+        f"Rule-based threshold violations:\n{issues_text}\n\n"
+        "Your job:\n"
+        "1. Identify the single worst bottleneck and explain WHY using the actual numbers\n"
+        "2. Explain how it cascades to affect other stages downstream\n"
+        "3. Give 3 specific, numbered actions the ops team should take in the next 30 minutes\n\n"
+        f"Context: You are analyzing a {body.industry} workflow. Use industry-appropriate language and urgency. "
+        "Reference actual metric values — no generic advice."
     )
 
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -134,7 +169,4 @@ async def analyze_custom(body: AnalyzeCustomRequest):
         groq_response.raise_for_status()
 
     ai_analysis = groq_response.json()["choices"][0]["message"]["content"]
-    return {
-        "detected_issues": issues,
-        "ai_analysis": ai_analysis,
-    }
+    return {"detected_issues": issues, "ai_analysis": ai_analysis}
