@@ -217,41 +217,32 @@ export default function Home() {
       <div className="max-w-7xl mx-auto">
 
         {/* Header */}
-        <div className="mb-6 flex items-start justify-between flex-wrap gap-4">
+        <div className="mb-8 flex items-center justify-between flex-wrap gap-4">
           <div>
-            <h1 className="text-3xl font-bold mb-1">Ops Intelligence Platform</h1>
-            <p className="text-gray-400">
-              {selectedIndustry === 'custom' && customIndustry
-                ? `${customIndustry.charAt(0).toUpperCase() + customIndustry.slice(1)} Operations`
-                : industryLabel
-              } — Live incident monitoring
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-2 h-8 bg-indigo-500 rounded-full" />
+              <h1 className="text-4xl font-extrabold tracking-tight">Ops Intelligence Platform</h1>
+            </div>
+            <p className="text-gray-400 text-base ml-5">
+              AI-powered workflow monitoring & bottleneck detection —{' '}
+              <span className="text-indigo-400 font-medium">
+                {selectedIndustry === 'custom' && customIndustry
+                  ? `${customIndustry.charAt(0).toUpperCase() + customIndustry.slice(1)} Operations`
+                  : industryLabel}
+              </span>
             </p>
           </div>
-
-          {/* Industry selector */}
           <div className="flex items-center gap-3">
             <label className="text-sm text-gray-400 whitespace-nowrap">Industry:</label>
             <select
               value={selectedIndustry}
-              onChange={e => {
-                setSelectedIndustry(e.target.value)
-                setCustomResult(null)
-                setCustomError(null)
-                setFormRows([emptyRow()])
-              }}
-              className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+              onChange={e => { setSelectedIndustry(e.target.value); setCustomResult(null); setCustomError(null); setFormRows([emptyRow()]) }}
+              className="bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm font-medium text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
             >
-              {INDUSTRIES.map(i => (
-                <option key={i.value} value={i.value}>{i.label}</option>
-              ))}
+              {INDUSTRIES.map(i => (<option key={i.value} value={i.value}>{i.label}</option>))}
             </select>
             {selectedIndustry === 'custom' && (
-              <input
-                value={customIndustry}
-                onChange={e => setCustomIndustry(e.target.value)}
-                placeholder="e.g. retail, manufacturing..."
-                className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500 w-48"
-              />
+              <input value={customIndustry} onChange={e => setCustomIndustry(e.target.value)} placeholder="e.g. retail, manufacturing..." className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500 w-48" />
             )}
           </div>
         </div>
