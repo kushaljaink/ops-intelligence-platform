@@ -24,6 +24,31 @@ type ResolutionEffectiveness = { stage: string; total_incidents: number; resolve
 type Playbook = { stage: string; playbook: string; data_summary: { total_incidents: number; resolution_rate: number; actions_recorded: number; best_actions: string[]; generated_at: string } } | null
 type OutcomeResult = { success: boolean; action_category: string; health_before: number | null; health_after: number | null; improvement: number | null } | null
 
+type AgentStep = {
+  step: number
+  tool: string
+  input: string
+  finding: string
+}
+
+type AgentDecisionPoint = {
+  id: string
+  type: string
+  question: string
+  action: string
+}
+
+type AgentResult = {
+  success: boolean
+  industry: string
+  goal: string
+  steps: AgentStep[]
+  output: string
+  decision_points: AgentDecisionPoint[]
+  investigated_at: string
+  error?: string
+} | null
+
 const BACKEND = 'https://ops-intelligence-platform.onrender.com'
 
 const INDUSTRIES = [
@@ -80,7 +105,7 @@ export default function Home() {
   const [forecast, setForecast] = useState<ForecastSlot[]>([])
   const [effectiveness, setEffectiveness] = useState<ResolutionEffectiveness[]>([])
   const [intelLoading, setIntelLoading] = useState(false)
-  const [activeIntelTab, setActiveIntelTab] = useState<'health' | 'patterns' | 'cascade' | 'anomaly' | 'eta' | 'forecast' | 'whatif' | 'effectiveness' | 'playbook'>('health')
+  const [activeIntelTab, setActiveIntelTab] = useState<'health' | 'patterns' | 'cascade' | 'anomaly' | 'eta' | 'forecast' | 'whatif' | 'effectiveness' | 'playbook' | 'agent'>('health')
 
   // What-if
   const [whatIfStage, setWhatIfStage] = useState('')
@@ -111,6 +136,16 @@ export default function Home() {
   const [customResult, setCustomResult] = useState<CustomResult>(null)
   const [customError, setCustomError] = useState<string | null>(null)
   const [customRateLimit, setCustomRateLimit] = useState(false)
+
+  // Agent
+  const [agentRunning, setAgentRunning] = useState(false)
+  const [agentResult, setAgentResult] = useState<AgentResult>(null)
+  const [agentError, setAgentError] = useState<string | null>(null)
+  const [agentGoal, setAgentGoal] = useState('')
+  const [decisionResponses, setDecisionResponses] = useState<Record<string, boolean | null>>({})
+  const [decisionLoading, setDecisionLoading] = useState<string | null>(null)
+  const [decisionResults, setDecisionResults] = useState<Record<string, string>>({})
+  const [agentRateLimit, setAgentRateLimit] = useState(false)
 
   const fetchIntelligence = async (industry: string) => {
     setIntelLoading(true)
@@ -230,6 +265,66 @@ export default function Home() {
     finally { setPlaybookLoading(false) }
   }
 
+  const runAgent = async () => {
+    setAgentRunning(true)
+    setAgentResult(null)
+    setAgentError(null)
+    setAgentRateLimit(false)
+    setDecisionResponses({})
+    setDecisionResults({})
+    try {
+      const r = await fetch(`${BACKEND}/agent/investigate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ industry: industryValue, goal: agentGoal || undefined }),
+      })
+      const d = await r.json()
+      if (r.status === 429 || d.detail?.startsWith('GROQ_RATE_LIMIT')) { setAgentRateLimit(true); return }
+      if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`)
+      if (!d.success) throw new Error(d.error || 'Investigation failed')
+      setAgentResult(d)
+    } catch (e: unknown) {
+      setAgentError(e instanceof Error ? e.message : 'Unknown error')
+    } finally {
+      setAgentRunning(false)
+    }
+  }
+
+  const handleDecision = async (decisionId: string, approved: boolean) => {
+    if (!agentResult) return
+    setDecisionLoading(decisionId)
+    setDecisionResponses(prev => ({ ...prev, [decisionId]: approved }))
+    try {
+      const r = await fetch(`${BACKEND}/agent/decision`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          decision_id: decisionId,
+          approved,
+          investigation_output: agentResult.output,
+          industry: industryValue,
+        }),
+      })
+      const d = await r.json()
+      setDecisionResults(prev => ({ ...prev, [decisionId]: approved ? (d.message || 'Action completed successfully') : 'Skipped' }))
+    } catch (e) { console.error(e) }
+    finally { setDecisionLoading(null) }
+  }
+
+  const toolIcon = (tool: string) => {
+    const icons: Record<string, string> = {
+      check_health_scores: '🏥',
+      get_cascade_predictions: '📈',
+      get_recurring_patterns: '🔄',
+      get_eta_to_breach: '⏱',
+      get_open_incidents: '🚨',
+      analyze_specific_incident: '🔍',
+    }
+    return icons[tool] || '🤖'
+  }
+
+  const toolLabel = (tool: string) => tool.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+
   const updateRow = (index: number, field: keyof WorkflowRow, value: string) =>
     setFormRows(prev => prev.map((r, i) => i === index ? { ...r, [field]: value } : r))
   const addRow = () => setFormRows(prev => [...prev, emptyRow()])
@@ -296,6 +391,7 @@ export default function Home() {
     { key: 'whatif', label: 'What-If Simulation' },
     { key: 'effectiveness', label: 'Resolution Effectiveness' },
     { key: 'playbook', label: 'Playbook Generator' },
+    { key: 'agent', label: '🤖 AI Agent' },
   ] as const
 
   return (
@@ -559,6 +655,126 @@ export default function Home() {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* AI Agent */}
+            {activeIntelTab === 'agent' && (
+              <div>
+                <div className="mb-6">
+                  <div className="flex items-start gap-3 p-4 rounded-xl bg-indigo-500/5 border border-indigo-500/20 mb-4">
+                    <div className="text-2xl">🤖</div>
+                    <div>
+                      <p className="text-sm font-semibold text-white mb-1">AI Investigation Agent</p>
+                      <p className="text-xs text-gray-400">The agent autonomously investigates your operation using 6 tools — checking health scores, cascade risks, patterns, open incidents, and ETAs. At every consequential step, <strong className="text-indigo-400">you decide</strong> whether it proceeds.</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-3">
+                    <input
+                      value={agentGoal}
+                      onChange={e => setAgentGoal(e.target.value)}
+                      placeholder="Optional: give the agent a specific goal (e.g. 'Focus on security_check stage')"
+                      className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                    />
+                    <button
+                      onClick={runAgent}
+                      disabled={agentRunning}
+                      className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition-colors whitespace-nowrap"
+                    >
+                      {agentRunning ? (
+                        <><svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" /></svg>Investigating…</>
+                      ) : '🤖 Run Investigation'}
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-600 mt-2">Investigation takes 20-40 seconds. The agent will call multiple tools before surfacing findings.</p>
+                </div>
+
+                {agentRateLimit && <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-300 text-sm mb-4">⏳ Rate limit reached. Wait 60 seconds and try again.</div>}
+                {agentError && <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm mb-4">Error: {agentError}</div>}
+
+                {agentResult && (
+                  <div className="space-y-6">
+                    {/* Investigation steps */}
+                    <div>
+                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+                        Investigation Steps — {agentResult.steps.length} tool calls made
+                      </p>
+                      <div className="space-y-2">
+                        {agentResult.steps.map((step, i) => (
+                          <div key={i} className="flex gap-3 p-3 rounded-lg bg-gray-800 border border-gray-700">
+                            <div className="text-lg shrink-0">{toolIcon(step.tool)}</div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="text-xs font-semibold text-indigo-400">Step {step.step}</span>
+                                <span className="text-xs text-gray-300">{toolLabel(step.tool)}</span>
+                                {step.input && step.input !== '{}' && step.input !== '""' && (
+                                  <span className="text-xs text-gray-600">→ {step.input.length > 40 ? step.input.slice(0, 40) + '…' : step.input}</span>
+                                )}
+                              </div>
+                              <p className="text-xs text-gray-400 leading-relaxed line-clamp-3">{step.finding}</p>
+                            </div>
+                            <div className="text-green-400 text-xs shrink-0">✓</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Agent findings */}
+                    <div className="p-5 rounded-xl bg-gray-800 border border-gray-700">
+                      <p className="text-xs font-semibold text-white uppercase tracking-wider mb-3">🧠 Agent Findings & Recommendations</p>
+                      <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{agentResult.output}</p>
+                      <p className="text-xs text-gray-600 mt-3">Investigated at {new Date(agentResult.investigated_at).toLocaleString()}</p>
+                    </div>
+
+                    {/* Human decision points */}
+                    {agentResult.decision_points.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+                          ⚡ Your Decisions — The agent is waiting for your input
+                        </p>
+                        <div className="space-y-3">
+                          {agentResult.decision_points.map((dp) => {
+                            const response = decisionResponses[dp.id]
+                            const result = decisionResults[dp.id]
+                            const isLoading = decisionLoading === dp.id
+                            return (
+                              <div key={dp.id} className={`p-4 rounded-xl border transition-all ${response === true ? 'bg-green-500/5 border-green-500/20' : response === false ? 'bg-gray-800 border-gray-700 opacity-60' : 'bg-indigo-500/5 border-indigo-500/30'}`}>
+                                <div className="flex items-start justify-between gap-4">
+                                  <div className="flex-1">
+                                    <p className="text-sm text-white mb-1">{dp.question}</p>
+                                    {result && <p className="text-xs text-gray-400 mt-1">→ {result}</p>}
+                                  </div>
+                                  {response === null || response === undefined ? (
+                                    <div className="flex gap-2 shrink-0">
+                                      <button
+                                        onClick={() => handleDecision(dp.id, true)}
+                                        disabled={isLoading}
+                                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-green-600 hover:bg-green-500 disabled:opacity-50 transition-colors"
+                                      >
+                                        {isLoading ? '…' : '✓ Yes'}
+                                      </button>
+                                      <button
+                                        onClick={() => handleDecision(dp.id, false)}
+                                        disabled={isLoading}
+                                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-700 hover:bg-gray-600 disabled:opacity-50 transition-colors"
+                                      >
+                                        Skip
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <span className={`text-xs px-2 py-1 rounded-full shrink-0 ${response ? 'bg-green-500/20 text-green-400' : 'bg-gray-700 text-gray-500'}`}>
+                                      {response ? 'Approved' : 'Skipped'}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
