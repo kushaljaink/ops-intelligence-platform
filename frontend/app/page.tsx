@@ -232,17 +232,17 @@ export default function Home() {
               </span>
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            <label className="text-sm text-gray-400 whitespace-nowrap">Industry:</label>
+          <div className="flex items-center gap-3 bg-gray-800 border border-indigo-500/40 rounded-xl px-4 py-2.5">
+            <label className="text-sm text-indigo-400 font-semibold whitespace-nowrap">Industry:</label>
             <select
               value={selectedIndustry}
               onChange={e => { setSelectedIndustry(e.target.value); setCustomResult(null); setCustomError(null); setFormRows([emptyRow()]) }}
-              className="bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm font-medium text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+              className="bg-transparent text-white text-sm font-semibold focus:outline-none cursor-pointer"
             >
-              {INDUSTRIES.map(i => (<option key={i.value} value={i.value}>{i.label}</option>))}
+              {INDUSTRIES.map(i => (<option key={i.value} value={i.value} className="bg-gray-800">{i.label}</option>))}
             </select>
             {selectedIndustry === 'custom' && (
-              <input value={customIndustry} onChange={e => setCustomIndustry(e.target.value)} placeholder="e.g. retail, manufacturing..." className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500 w-48" />
+              <input value={customIndustry} onChange={e => setCustomIndustry(e.target.value)} placeholder="e.g. retail, manufacturing..." className="bg-transparent border-l border-gray-600 pl-3 text-sm text-white placeholder-gray-500 focus:outline-none w-48" />
             )}
           </div>
         </div>
