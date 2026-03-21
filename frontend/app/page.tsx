@@ -84,6 +84,39 @@ type AnomalyScore = {
   insight: string
 }
 
+type ETAPrediction = {
+  stage: string
+  current_health: number
+  health_change_per_hour: number
+  eta_hours: number | null
+  status: string
+  urgency: 'critical' | 'warning' | 'monitor' | 'low'
+  factors: string[]
+  insight: string
+}
+
+type ForecastSlot = {
+  stage: string
+  dow_label: string
+  hour_label: string
+  breach_rate: number
+  avg_health: number
+  risk: 'high' | 'medium'
+  date: string
+  days_away: number
+  forecast: string
+}
+
+type WhatIfResult = {
+  stage: string
+  change_description: string
+  current: { queue: number; processing_time: number; throughput: number; health: number }
+  projected: { queue: number; processing_time: number; throughput: number; health: number }
+  health_improvement: number
+  would_resolve_breach: boolean
+  ai_assessment: string
+} | null
+
 const BACKEND = 'https://ops-intelligence-platform.onrender.com'
 
 const INDUSTRIES = [
@@ -103,7 +136,7 @@ const INDUSTRY_CONTEXT: Record<string, { scenario: string; what: string; example
   },
   healthcare: {
     scenario: 'A hospital emergency department during a high-demand shift',
-    what: 'Each incident represents a patient flow stage where wait times or throughput have exceeded safe operational limits.',
+    what: 'Each incident represents a patient flow stage where wait times or throughput have exceeded safe limits.',
     example: { stage: 'patient_triage', queue_size: '28', processing_time_seconds: '180', throughput: '8' },
   },
   banking: {
@@ -118,18 +151,25 @@ const INDUSTRY_CONTEXT: Record<string, { scenario: string; what: string; example
   },
   airport: {
     scenario: 'An international airport terminal during morning peak hours',
-    what: 'Each incident represents a passenger processing stage where throughput or wait times have exceeded safe thresholds.',
+    what: 'Each incident represents a passenger processing stage where throughput or wait times have exceeded thresholds.',
     example: { stage: 'security_screening', queue_size: '95', processing_time_seconds: '300', throughput: '14' },
   },
   custom: {
     scenario: 'A live operational workflow with active threshold breaches',
-    what: 'Each incident represents a stage in your workflow where metrics have exceeded normal operating limits.',
+    what: 'Each incident represents a stage where metrics have exceeded normal operating limits.',
     example: { stage: 'your_stage', queue_size: '75', processing_time_seconds: '350', throughput: '6' },
   },
 }
 
 const CSV_TEMPLATE = `stage,queue_size,processing_time_seconds,throughput\nstage_one,12,45,120\nstage_two,67,380,8`
 const emptyRow = (): WorkflowRow => ({ stage: '', queue_size: '', processing_time_seconds: '', throughput: '' })
+
+const WHATIF_CHANGES = [
+  { value: 'add_staff', label: 'Add Staff' },
+  { value: 'reduce_queue', label: 'Reduce Queue' },
+  { value: 'upgrade_equipment', label: 'Upgrade Equipment' },
+  { value: 'extend_hours', label: 'Extend Hours' },
+]
 
 export default function Home() {
   const [incidents, setIncidents] = useState<Incident[]>([])
@@ -141,13 +181,23 @@ export default function Home() {
   const [showHistoryId, setShowHistoryId] = useState<string | null>(null)
   const [stats, setStats] = useState<Stats | null>(null)
 
-  // Intelligence state
+  // Phase 2 intelligence
   const [healthScores, setHealthScores] = useState<HealthScore[]>([])
   const [patterns, setPatterns] = useState<RecurringPattern[]>([])
   const [cascades, setCascades] = useState<CascadePrediction[]>([])
   const [anomalies, setAnomalies] = useState<AnomalyScore[]>([])
   const [intelLoading, setIntelLoading] = useState(false)
-  const [activeIntelTab, setActiveIntelTab] = useState<'health' | 'patterns' | 'cascade' | 'anomaly'>('health')
+  const [activeIntelTab, setActiveIntelTab] = useState<'health' | 'patterns' | 'cascade' | 'anomaly' | 'eta' | 'forecast' | 'whatif'>('health')
+
+  // Phase 3 predictive
+  const [etaPredictions, setEtaPredictions] = useState<ETAPrediction[]>([])
+  const [forecast, setForecast] = useState<ForecastSlot[]>([])
+  const [whatIfStage, setWhatIfStage] = useState('')
+  const [whatIfChange, setWhatIfChange] = useState('add_staff')
+  const [whatIfMagnitude, setWhatIfMagnitude] = useState(2)
+  const [whatIfLoading, setWhatIfLoading] = useState(false)
+  const [whatIfResult, setWhatIfResult] = useState<WhatIfResult>(null)
+  const [whatIfRateLimit, setWhatIfRateLimit] = useState(false)
 
   // Industry
   const [selectedIndustry, setSelectedIndustry] = useState('cruise')
@@ -168,60 +218,64 @@ export default function Home() {
   const fetchIntelligence = async (industry: string) => {
     setIntelLoading(true)
     try {
-      const [h, p, c, a] = await Promise.all([
+      const [h, p, c, a, eta, fc] = await Promise.all([
         fetch(`${BACKEND}/intelligence/health-scores?industry=${industry}`).then(r => r.json()),
         fetch(`${BACKEND}/intelligence/recurring-patterns?industry=${industry}`).then(r => r.json()),
         fetch(`${BACKEND}/intelligence/cascade-predictions?industry=${industry}`).then(r => r.json()),
         fetch(`${BACKEND}/intelligence/anomaly-scores?industry=${industry}`).then(r => r.json()),
+        fetch(`${BACKEND}/intelligence/eta-to-breach?industry=${industry}`).then(r => r.json()),
+        fetch(`${BACKEND}/intelligence/capacity-forecast?industry=${industry}`).then(r => r.json()),
       ])
       setHealthScores(h.health_scores ?? [])
       setPatterns(p.patterns ?? [])
       setCascades(c.predictions ?? [])
       setAnomalies(a.anomaly_scores ?? [])
-    } catch (e) {
-      console.error('Intel fetch failed', e)
-    } finally {
-      setIntelLoading(false)
-    }
+      setEtaPredictions(eta.predictions ?? [])
+      setForecast(fc.forecast ?? [])
+    } catch (e) { console.error('Intel fetch failed', e) }
+    finally { setIntelLoading(false) }
   }
 
   const fetchData = (industry: string) => {
-    setLoading(true)
-    setError(null)
-    setIncidents([])
-    setAnalyses({})
-    setStats(null)
+    setLoading(true); setError(null); setIncidents([]); setAnalyses({}); setStats(null)
     Promise.all([
       fetch(`${BACKEND}/incidents?industry=${industry}`).then(r => r.json()),
       fetch(`${BACKEND}/incidents/stats?industry=${industry}`).then(r => r.json()),
     ])
-      .then(([incData, statsData]) => {
-        setIncidents(incData.incidents ?? [])
-        setStats(statsData)
-        setLoading(false)
-      })
+      .then(([incData, statsData]) => { setIncidents(incData.incidents ?? []); setStats(statsData); setLoading(false) })
       .catch(err => { setError(err.message); setLoading(false) })
   }
 
   useEffect(() => {
     fetchData(industryValue)
     fetchIntelligence(industryValue)
+    setWhatIfStage('')
+    setWhatIfResult(null)
   }, [industryValue])
+
+  const runWhatIf = async () => {
+    if (!whatIfStage) return
+    setWhatIfLoading(true); setWhatIfResult(null); setWhatIfRateLimit(false)
+    try {
+      const r = await fetch(`${BACKEND}/intelligence/whatif-simulation?industry=${industryValue}&stage=${whatIfStage}&change=${whatIfChange}&magnitude=${whatIfMagnitude}`)
+      const d = await r.json()
+      if (r.status === 429 || d.detail?.startsWith('GROQ_RATE_LIMIT')) { setWhatIfRateLimit(true); return }
+      if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`)
+      setWhatIfResult(d)
+    } catch (e: unknown) { console.error(e) }
+    finally { setWhatIfLoading(false) }
+  }
 
   const analyzeIncident = async (id: string) => {
     setAnalyses(prev => ({ ...prev, [id]: { loading: true, result: null, error: null, rateLimit: false } }))
     try {
       const r = await fetch(`${BACKEND}/analyze-incident/${id}`, { method: 'POST' })
       const d = await r.json()
-      if (r.status === 429 || d.detail?.startsWith('GROQ_RATE_LIMIT')) {
-        setAnalyses(prev => ({ ...prev, [id]: { loading: false, result: null, error: null, rateLimit: true } }))
-        return
-      }
+      if (r.status === 429 || d.detail?.startsWith('GROQ_RATE_LIMIT')) { setAnalyses(prev => ({ ...prev, [id]: { loading: false, result: null, error: null, rateLimit: true } })); return }
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       setAnalyses(prev => ({ ...prev, [id]: { loading: false, result: d.ai_analysis, error: null, rateLimit: false } }))
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Unknown error'
-      setAnalyses(prev => ({ ...prev, [id]: { loading: false, result: null, error: message, rateLimit: false } }))
+      setAnalyses(prev => ({ ...prev, [id]: { loading: false, result: null, error: err instanceof Error ? err.message : 'Unknown error', rateLimit: false } }))
     }
   }
 
@@ -232,7 +286,7 @@ export default function Home() {
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       setIncidents(prev => prev.map(i => i.id === id ? { ...i, status: 'resolved' } : i))
       setStats(prev => prev ? { ...prev, open: Math.max(0, prev.open - 1) } : prev)
-    } catch (err) { console.error('Failed to resolve:', err) }
+    } catch (err) { console.error(err) }
     finally { setResolvingId(null) }
   }
 
@@ -267,63 +321,46 @@ export default function Home() {
     setCustomLoading(true); setCustomResult(null); setCustomError(null); setCustomRateLimit(false)
     try {
       const r = await fetch(`${BACKEND}/analyze-custom`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          industry: industryValue,
-          rows: rows.map(r => ({
-            stage: r.stage,
-            queue_size: parseFloat(r.queue_size) || 0,
-            processing_time_seconds: parseFloat(r.processing_time_seconds) || 0,
-            throughput: parseFloat(r.throughput) || 0,
-          })),
-        }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ industry: industryValue, rows: rows.map(r => ({ stage: r.stage, queue_size: parseFloat(r.queue_size) || 0, processing_time_seconds: parseFloat(r.processing_time_seconds) || 0, throughput: parseFloat(r.throughput) || 0 })) }),
       })
       const d = await r.json()
       if (r.status === 429 || d.detail?.startsWith('GROQ_RATE_LIMIT')) { setCustomRateLimit(true); return }
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       setCustomResult(d)
-    } catch (err: unknown) {
-      setCustomError(err instanceof Error ? err.message : 'Unknown error')
-    } finally { setCustomLoading(false) }
+    } catch (err: unknown) { setCustomError(err instanceof Error ? err.message : 'Unknown error') }
+    finally { setCustomLoading(false) }
   }
 
   const downloadTemplate = () => {
     const blob = new Blob([CSV_TEMPLATE], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url; a.download = 'workflow_template.csv'; a.click()
+    const a = document.createElement('a'); a.href = url; a.download = 'workflow_template.csv'; a.click()
     URL.revokeObjectURL(url)
   }
 
   const severityColor = (s: string) => s === 'high' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : s === 'medium' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' : 'bg-green-500/20 text-green-400 border border-green-500/30'
   const stageLabel = (s: string) => s.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+  const healthColor = (status: string) => ({ healthy: 'text-green-400', warning: 'text-yellow-400', critical: 'text-orange-400', severe: 'text-red-400' }[status] ?? 'text-gray-400')
+  const healthBarColor = (status: string) => ({ healthy: 'bg-green-500', warning: 'bg-yellow-500', critical: 'bg-orange-500', severe: 'bg-red-500' }[status] ?? 'bg-gray-500')
+  const trendIcon = (t: string) => t === 'degrading' ? '↓' : t === 'improving' ? '↑' : '→'
+  const trendColor = (t: string) => t === 'degrading' ? 'text-red-400' : t === 'improving' ? 'text-green-400' : 'text-gray-500'
+  const urgencyColor = (u: string) => ({ critical: 'bg-red-500/10 border-red-500/30 text-red-400', warning: 'bg-orange-500/10 border-orange-500/30 text-orange-400', monitor: 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400', low: 'bg-gray-800 border-gray-700 text-gray-400' }[u] ?? 'bg-gray-800 border-gray-700')
+  const trendLabel = (trend: number) => trend > 0 ? <span className="text-xs text-red-400 ml-2">↑ {trend} from yesterday</span> : trend < 0 ? <span className="text-xs text-green-400 ml-2">↓ {Math.abs(trend)} from yesterday</span> : <span className="text-xs text-gray-500 ml-2">same as yesterday</span>
 
-  const healthColor = (status: string) => {
-    if (status === 'healthy') return 'text-green-400'
-    if (status === 'warning') return 'text-yellow-400'
-    if (status === 'critical') return 'text-orange-400'
-    return 'text-red-400'
-  }
-
-  const healthBarColor = (status: string) => {
-    if (status === 'healthy') return 'bg-green-500'
-    if (status === 'warning') return 'bg-yellow-500'
-    if (status === 'critical') return 'bg-orange-500'
-    return 'bg-red-500'
-  }
-
-  const trendIcon = (trend: string) => trend === 'degrading' ? '↓' : trend === 'improving' ? '↑' : '→'
-  const trendColor = (trend: string) => trend === 'degrading' ? 'text-red-400' : trend === 'improving' ? 'text-green-400' : 'text-gray-500'
-
-  const trendLabel = (trend: number) => {
-    if (trend > 0) return <span className="text-xs text-red-400 ml-2">↑ {trend} from yesterday</span>
-    if (trend < 0) return <span className="text-xs text-green-400 ml-2">↓ {Math.abs(trend)} from yesterday</span>
-    return <span className="text-xs text-gray-500 ml-2">same as yesterday</span>
-  }
-
-  const ex = context.example
   const activeAlerts = cascades.filter(c => c.alert)
+  const criticalETA = etaPredictions.filter(e => e.urgency === 'critical' || e.urgency === 'warning')
+  const ex = context.example
+
+  const intelTabs = [
+    { key: 'health', label: 'Stage Health' },
+    { key: 'patterns', label: 'Recurring Patterns' },
+    { key: 'cascade', label: 'Cascade Predictions', badge: activeAlerts.length },
+    { key: 'anomaly', label: 'Anomaly Scores' },
+    { key: 'eta', label: 'ETA to Breach', badge: criticalETA.length },
+    { key: 'forecast', label: '7-Day Forecast' },
+    { key: 'whatif', label: 'What-If Simulation' },
+  ] as const
 
   return (
     <main className="min-h-screen bg-gray-950 text-white p-8">
@@ -338,39 +375,35 @@ export default function Home() {
             </div>
             <p className="text-gray-400 text-base ml-5">
               AI-powered workflow monitoring & bottleneck detection —{' '}
-              <span className="text-indigo-400 font-medium">
-                {selectedIndustry === 'custom' && customIndustry ? `${customIndustry.charAt(0).toUpperCase() + customIndustry.slice(1)} Operations` : industryLabel}
-              </span>
+              <span className="text-indigo-400 font-medium">{selectedIndustry === 'custom' && customIndustry ? `${customIndustry.charAt(0).toUpperCase() + customIndustry.slice(1)} Operations` : industryLabel}</span>
             </p>
           </div>
           <div className="flex items-center gap-3 bg-gray-800 border border-indigo-500/40 rounded-xl px-4 py-2.5">
             <label className="text-sm text-indigo-400 font-semibold whitespace-nowrap">Industry:</label>
-            <select
-              value={selectedIndustry}
-              onChange={e => { setSelectedIndustry(e.target.value); setCustomResult(null); setCustomError(null); setFormRows([emptyRow()]) }}
-              className="bg-transparent text-white text-sm font-semibold focus:outline-none cursor-pointer"
-            >
+            <select value={selectedIndustry} onChange={e => { setSelectedIndustry(e.target.value); setCustomResult(null); setCustomError(null); setFormRows([emptyRow()]) }} className="bg-transparent text-white text-sm font-semibold focus:outline-none cursor-pointer">
               {INDUSTRIES.map(i => (<option key={i.value} value={i.value} className="bg-gray-800">{i.label}</option>))}
             </select>
-            {selectedIndustry === 'custom' && (
-              <input value={customIndustry} onChange={e => setCustomIndustry(e.target.value)} placeholder="e.g. retail..." className="bg-transparent border-l border-gray-600 pl-3 text-sm text-white placeholder-gray-500 focus:outline-none w-40" />
-            )}
+            {selectedIndustry === 'custom' && <input value={customIndustry} onChange={e => setCustomIndustry(e.target.value)} placeholder="e.g. retail..." className="bg-transparent border-l border-gray-600 pl-3 text-sm text-white placeholder-gray-500 focus:outline-none w-40" />}
           </div>
         </div>
 
         {/* Hero */}
         <div className="bg-gradient-to-r from-indigo-900/40 via-gray-900 to-gray-900 border border-indigo-500/20 rounded-2xl px-8 py-6 mb-8">
           <p className="text-2xl font-semibold text-white mb-1">Detect bottlenecks before they become crises.</p>
-          <p className="text-gray-400 text-sm max-w-2xl">Real-time incident detection powered by AI. Explore live demo incidents, analyze patterns, predict cascades, and get root cause analysis in under 3 seconds.</p>
+          <p className="text-gray-400 text-sm max-w-2xl">Real-time incident detection powered by AI. Analyze patterns, predict cascades, forecast capacity, and simulate operational changes — all from 30 days of historical data.</p>
         </div>
 
-        {/* Cascade alerts banner */}
+        {/* Alert banners */}
         {activeAlerts.length > 0 && (
-          <div className="mb-6 p-4 rounded-xl bg-orange-500/10 border border-orange-500/30">
+          <div className="mb-4 p-4 rounded-xl bg-orange-500/10 border border-orange-500/30">
             <p className="text-xs font-semibold text-orange-400 uppercase tracking-wider mb-2">⚠ Cascade Risk Detected</p>
-            {activeAlerts.map((a, i) => (
-              <p key={i} className="text-sm text-orange-300">{a.insight}</p>
-            ))}
+            {activeAlerts.map((a, i) => <p key={i} className="text-sm text-orange-300">{a.insight}</p>)}
+          </div>
+        )}
+        {criticalETA.length > 0 && (
+          <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/30">
+            <p className="text-xs font-semibold text-red-400 uppercase tracking-wider mb-2">🕐 Breach Imminent</p>
+            {criticalETA.map((e, i) => <p key={i} className="text-sm text-red-300">{e.insight}</p>)}
           </div>
         )}
 
@@ -394,29 +427,18 @@ export default function Home() {
         <div className="mb-8 bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-semibold">Pattern Intelligence</h2>
-              <p className="text-xs text-gray-500 mt-0.5">30 days of historical analysis — health scores, recurring failures, cascade risks</p>
+              <h2 className="text-lg font-semibold">Intelligence Engine</h2>
+              <p className="text-xs text-gray-500 mt-0.5">Phase 2: Pattern detection · Phase 3: Predictive forecasting & simulation</p>
             </div>
             {intelLoading && <div className="flex items-center gap-2 text-xs text-gray-500"><svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" /></svg>Analyzing…</div>}
           </div>
 
-          {/* Intel tabs */}
-          <div className="flex border-b border-gray-800 px-6">
-            {([
-              { key: 'health', label: 'Stage Health' },
-              { key: 'patterns', label: 'Recurring Patterns' },
-              { key: 'cascade', label: 'Cascade Predictions' },
-              { key: 'anomaly', label: 'Anomaly Scores' },
-            ] as const).map(tab => (
-              <button
-                key={tab.key}
-                onClick={() => setActiveIntelTab(tab.key)}
-                className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeIntelTab === tab.key ? 'border-indigo-500 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'}`}
-              >
+          {/* Scrollable tabs */}
+          <div className="flex border-b border-gray-800 px-6 overflow-x-auto">
+            {intelTabs.map(tab => (
+              <button key={tab.key} onClick={() => setActiveIntelTab(tab.key)} className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap flex items-center gap-2 ${activeIntelTab === tab.key ? 'border-indigo-500 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'}`}>
                 {tab.label}
-                {tab.key === 'cascade' && activeAlerts.length > 0 && (
-                  <span className="ml-2 bg-orange-500 text-white text-xs px-1.5 py-0.5 rounded-full">{activeAlerts.length}</span>
-                )}
+                {'badge' in tab && tab.badge > 0 && <span className={`text-xs px-1.5 py-0.5 rounded-full text-white ${tab.key === 'eta' ? 'bg-red-500' : 'bg-orange-500'}`}>{tab.badge}</span>}
               </button>
             ))}
           </div>
@@ -429,18 +451,13 @@ export default function Home() {
                 {healthScores.length === 0 && !intelLoading && <p className="text-gray-500 text-sm">No health data available.</p>}
                 {healthScores.map(h => (
                   <div key={h.stage} className="flex items-center gap-4">
-                    <div className="w-36 text-sm text-gray-300 shrink-0">{stageLabel(h.stage)}</div>
+                    <div className="w-40 text-sm text-gray-300 shrink-0">{stageLabel(h.stage)}</div>
                     <div className="flex-1 bg-gray-800 rounded-full h-2">
                       <div className={`h-2 rounded-full transition-all ${healthBarColor(h.status)}`} style={{ width: `${h.health_score}%` }} />
                     </div>
                     <div className={`w-12 text-right text-sm font-semibold ${healthColor(h.status)}`}>{h.health_score}</div>
-                    <div className={`w-6 text-center text-sm font-bold ${trendColor(h.trend)}`}>{trendIcon(h.trend)}</div>
-                    <div className={`w-16 text-xs px-2 py-0.5 rounded-full text-center ${
-                      h.status === 'healthy' ? 'bg-green-500/10 text-green-400' :
-                      h.status === 'warning' ? 'bg-yellow-500/10 text-yellow-400' :
-                      h.status === 'critical' ? 'bg-orange-500/10 text-orange-400' :
-                      'bg-red-500/10 text-red-400'
-                    }`}>{h.status}</div>
+                    <div className={`w-5 text-center text-sm font-bold ${trendColor(h.trend)}`}>{trendIcon(h.trend)}</div>
+                    <div className={`w-16 text-xs px-2 py-0.5 rounded-full text-center ${{ healthy: 'bg-green-500/10 text-green-400', warning: 'bg-yellow-500/10 text-yellow-400', critical: 'bg-orange-500/10 text-orange-400', severe: 'bg-red-500/10 text-red-400' }[h.status]}`}>{h.status}</div>
                   </div>
                 ))}
               </div>
@@ -460,9 +477,7 @@ export default function Home() {
                           {p.peak_dow_pct >= 30 && <span>Peak day: <span className="text-gray-300">{p.peak_dow_label}s ({p.peak_dow_pct}%)</span></span>}
                         </div>
                       </div>
-                      <span className={`text-xs font-semibold px-2 py-1 rounded-full shrink-0 ${p.severity === 'high' ? 'bg-red-500/20 text-red-400' : p.severity === 'medium' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-gray-700 text-gray-400'}`}>
-                        {p.breach_count} breaches
-                      </span>
+                      <span className={`text-xs font-semibold px-2 py-1 rounded-full shrink-0 ${p.severity === 'high' ? 'bg-red-500/20 text-red-400' : p.severity === 'medium' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-gray-700 text-gray-400'}`}>{p.breach_count} breaches</span>
                     </div>
                   </div>
                 ))}
@@ -481,11 +496,8 @@ export default function Home() {
                         <p className="text-sm text-gray-300">{c.insight}</p>
                         <p className="text-xs text-gray-500 mt-1">Lag: {c.lag_hours}hrs · Confidence: {c.confidence}%</p>
                       </div>
-                      <div className={`text-lg font-bold shrink-0 ${c.confidence >= 70 ? 'text-red-400' : c.confidence >= 50 ? 'text-orange-400' : 'text-yellow-400'}`}>
-                        {c.confidence}%
-                      </div>
+                      <div className={`text-lg font-bold shrink-0 ${c.confidence >= 70 ? 'text-red-400' : c.confidence >= 50 ? 'text-orange-400' : 'text-yellow-400'}`}>{c.confidence}%</div>
                     </div>
-                    {/* Confidence bar */}
                     <div className="mt-2 bg-gray-700 rounded-full h-1.5">
                       <div className={`h-1.5 rounded-full ${c.confidence >= 70 ? 'bg-red-500' : c.confidence >= 50 ? 'bg-orange-500' : 'bg-yellow-500'}`} style={{ width: `${c.confidence}%` }} />
                     </div>
@@ -503,22 +515,147 @@ export default function Home() {
                     <div className="flex items-center justify-between gap-4">
                       <div>
                         <p className="text-sm text-gray-300">{a.insight}</p>
-                        <div className="flex items-center gap-4 text-xs text-gray-500 mt-1">
+                        <div className="flex gap-4 text-xs text-gray-500 mt-1">
                           <span>Current: <span className={a.current_health < a.baseline_health ? 'text-red-400' : 'text-green-400'}>{a.current_health}</span></span>
                           <span>30-day baseline: <span className="text-gray-300">{a.baseline_health}</span></span>
                         </div>
                       </div>
-                      {a.flag && (
-                        <span className="text-xs font-semibold px-2 py-1 rounded-full bg-purple-500/20 text-purple-400 shrink-0">
-                          Anomaly: {a.anomaly_score}
-                        </span>
-                      )}
+                      {a.flag && <span className="text-xs font-semibold px-2 py-1 rounded-full bg-purple-500/20 text-purple-400 shrink-0">Anomaly: {a.anomaly_score}</span>}
                     </div>
                   </div>
                 ))}
               </div>
             )}
 
+            {/* ETA to Breach */}
+            {activeIntelTab === 'eta' && (
+              <div className="space-y-3">
+                <p className="text-xs text-gray-500 mb-4">Based on health score trajectory over the last 12 hours. Stages stable or improving are not shown.</p>
+                {etaPredictions.length === 0 && !intelLoading && <div className="p-4 rounded-xl bg-green-500/5 border border-green-500/20"><p className="text-sm text-green-400">✓ All stages are stable or improving. No breach predicted in the next 24 hours.</p></div>}
+                {etaPredictions.map((e, i) => (
+                  <div key={i} className={`p-4 rounded-xl border ${urgencyColor(e.urgency)}`}>
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <p className="text-sm font-semibold text-white">{stageLabel(e.stage)}</p>
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${{ critical: 'bg-red-500/20 text-red-400', warning: 'bg-orange-500/20 text-orange-400', monitor: 'bg-yellow-500/20 text-yellow-400', low: 'bg-gray-700 text-gray-400' }[e.urgency]}`}>{e.urgency.toUpperCase()}</span>
+                        </div>
+                        <p className="text-sm text-gray-300 mb-2">{e.insight}</p>
+                        {e.factors.length > 0 && (
+                          <div className="flex flex-wrap gap-2">
+                            {e.factors.map((f, fi) => <span key={fi} className="text-xs bg-gray-700 text-gray-400 px-2 py-0.5 rounded">{f}</span>)}
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className={`text-2xl font-bold ${e.urgency === 'critical' ? 'text-red-400' : e.urgency === 'warning' ? 'text-orange-400' : 'text-yellow-400'}`}>
+                          {e.eta_hours === 0 ? '!' : e.eta_hours !== null ? `${e.eta_hours}h` : '—'}
+                        </p>
+                        <p className="text-xs text-gray-500">to breach</p>
+                      </div>
+                    </div>
+                    {/* Health decline bar */}
+                    <div className="mt-3">
+                      <div className="flex justify-between text-xs text-gray-500 mb-1">
+                        <span>Current health: {e.current_health}</span>
+                        <span>Critical threshold: 40</span>
+                      </div>
+                      <div className="bg-gray-700 rounded-full h-2">
+                        <div className={`h-2 rounded-full ${e.current_health >= 70 ? 'bg-yellow-500' : e.current_health >= 50 ? 'bg-orange-500' : 'bg-red-500'}`} style={{ width: `${e.current_health}%` }} />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 7-Day Forecast */}
+            {activeIntelTab === 'forecast' && (
+              <div className="space-y-3">
+                <p className="text-xs text-gray-500 mb-4">High-risk time windows for the next 7 days, based on 30-day historical breach patterns.</p>
+                {forecast.length === 0 && !intelLoading && <div className="p-4 rounded-xl bg-green-500/5 border border-green-500/20"><p className="text-sm text-green-400">✓ No high-risk windows detected in the next 7 days based on historical patterns.</p></div>}
+                {forecast.map((f, i) => (
+                  <div key={i} className={`p-4 rounded-xl border ${f.risk === 'high' ? 'bg-red-500/5 border-red-500/20' : 'bg-yellow-500/5 border-yellow-500/20'}`}>
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <p className="text-xs font-semibold text-gray-400">{f.date} · {f.hour_label}</p>
+                          <span className="text-xs text-gray-500">({f.days_away === 1 ? 'tomorrow' : `in ${f.days_away} days`})</span>
+                        </div>
+                        <p className="text-sm text-gray-300">{f.forecast}</p>
+                        <p className="text-xs text-gray-500 mt-1">Avg health during this window: {f.avg_health}/100</p>
+                      </div>
+                      <span className={`text-sm font-bold shrink-0 ${f.risk === 'high' ? 'text-red-400' : 'text-yellow-400'}`}>{f.breach_rate}%</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* What-If Simulation */}
+            {activeIntelTab === 'whatif' && (
+              <div>
+                <p className="text-xs text-gray-500 mb-4">Simulate the impact of an operational change on a specific stage. Uses the last 24hrs of real metrics as baseline.</p>
+                <div className="grid grid-cols-2 gap-4 mb-4 lg:grid-cols-4">
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">Stage</label>
+                    <input value={whatIfStage} onChange={e => setWhatIfStage(e.target.value)} placeholder="e.g. security_check" className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">Change type</label>
+                    <select value={whatIfChange} onChange={e => setWhatIfChange(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+                      {WHATIF_CHANGES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">Magnitude (1–5)</label>
+                    <input type="number" min={1} max={5} value={whatIfMagnitude} onChange={e => setWhatIfMagnitude(parseInt(e.target.value) || 1)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500" />
+                  </div>
+                  <div className="flex items-end">
+                    <button onClick={runWhatIf} disabled={whatIfLoading || !whatIfStage} className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition-colors">
+                      {whatIfLoading ? <><svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" /></svg>Simulating…</> : 'Run Simulation'}
+                    </button>
+                  </div>
+                </div>
+
+                {whatIfRateLimit && <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-300 text-sm mb-4">⏳ Rate limit reached. Wait 60 seconds.</div>}
+
+                {whatIfResult && (
+                  <div className="space-y-4">
+                    <div className="p-4 rounded-xl bg-indigo-500/5 border border-indigo-500/20">
+                      <p className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-3">{whatIfResult.change_description} — {stageLabel(whatIfResult.stage)}</p>
+                      <div className="grid grid-cols-2 gap-4 mb-4">
+                        <div className="bg-gray-800 rounded-lg p-3">
+                          <p className="text-xs text-gray-500 mb-2">Current</p>
+                          <div className="space-y-1 text-sm">
+                            <div className="flex justify-between"><span className="text-gray-400">Queue</span><span className="text-white">{whatIfResult.current.queue}</span></div>
+                            <div className="flex justify-between"><span className="text-gray-400">Processing</span><span className="text-white">{whatIfResult.current.processing_time}s</span></div>
+                            <div className="flex justify-between"><span className="text-gray-400">Throughput</span><span className="text-white">{whatIfResult.current.throughput}/hr</span></div>
+                            <div className="flex justify-between"><span className="text-gray-400">Health</span><span className="text-orange-400 font-semibold">{whatIfResult.current.health}</span></div>
+                          </div>
+                        </div>
+                        <div className="bg-gray-800 rounded-lg p-3 border border-indigo-500/20">
+                          <p className="text-xs text-gray-500 mb-2">Projected</p>
+                          <div className="space-y-1 text-sm">
+                            <div className="flex justify-between"><span className="text-gray-400">Queue</span><span className="text-green-400">{whatIfResult.projected.queue}</span></div>
+                            <div className="flex justify-between"><span className="text-gray-400">Processing</span><span className="text-green-400">{whatIfResult.projected.processing_time}s</span></div>
+                            <div className="flex justify-between"><span className="text-gray-400">Throughput</span><span className="text-green-400">{whatIfResult.projected.throughput}/hr</span></div>
+                            <div className="flex justify-between"><span className="text-gray-400">Health</span><span className="text-green-400 font-semibold">{whatIfResult.projected.health} (+{whatIfResult.health_improvement})</span></div>
+                          </div>
+                        </div>
+                      </div>
+                      <div className={`text-xs font-semibold px-3 py-1.5 rounded-lg inline-block mb-3 ${whatIfResult.would_resolve_breach ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'}`}>
+                        {whatIfResult.would_resolve_breach ? '✓ This change would resolve the current breach' : '⚠ This change alone would not resolve the breach'}
+                      </div>
+                      <div className="border-t border-gray-700 pt-3">
+                        <p className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-2">AI Assessment</p>
+                        <p className="text-sm text-gray-300 leading-relaxed">{whatIfResult.ai_assessment}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -533,7 +670,6 @@ export default function Home() {
               <p className="text-sm text-gray-300 mb-1">{context.scenario}</p>
               <p className="text-xs text-gray-500">{context.what}</p>
             </div>
-
             {loading ? <p className="text-gray-400">Loading incidents...</p>
               : error ? <p className="text-red-400">Failed to load: {error}</p>
               : incidents.length === 0 ? <div className="bg-gray-900 rounded-xl p-6 border border-gray-800 text-gray-500 text-sm">No incidents found.</div>
@@ -559,17 +695,13 @@ export default function Home() {
                             <span>Detected: {new Date(incident.created_at).toLocaleString()}</span>
                           </div>
                           <div className="flex items-center gap-2">
-                            {!isResolved && (
-                              <button onClick={() => resolveIncident(incident.id)} disabled={resolvingId === incident.id} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-green-600/20 hover:bg-green-600/40 text-green-400 border border-green-500/30 disabled:opacity-50 transition-colors">
-                                {resolvingId === incident.id ? 'Resolving…' : '✓ Mark Resolved'}
-                              </button>
-                            )}
+                            {!isResolved && <button onClick={() => resolveIncident(incident.id)} disabled={resolvingId === incident.id} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-green-600/20 hover:bg-green-600/40 text-green-400 border border-green-500/30 disabled:opacity-50 transition-colors">{resolvingId === incident.id ? 'Resolving…' : '✓ Mark Resolved'}</button>}
                             <button onClick={() => analyzeIncident(incident.id)} disabled={analysis?.loading} className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition-colors">
                               {analysis?.loading ? <><svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" /></svg>Analyzing…</> : 'Analyze with AI'}
                             </button>
                           </div>
                         </div>
-                        {analysis?.rateLimit && <div className="mt-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-300 text-sm">⏳ <strong>AI rate limit reached.</strong> Please wait 60 seconds and try again.</div>}
+                        {analysis?.rateLimit && <div className="mt-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-300 text-sm">⏳ Rate limit reached. Wait 60 seconds.</div>}
                         {analysis?.error && <div className="mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">Error: {analysis.error}</div>}
                         {analysis?.result && (
                           <div className="mt-4 p-4 rounded-lg bg-indigo-500/10 border border-indigo-500/20">
@@ -606,7 +738,7 @@ export default function Home() {
             <h2 className="text-lg font-semibold mb-3">Try With Your Data</h2>
             <div className="bg-gray-800/60 border border-gray-700 rounded-lg px-4 py-3 mb-4">
               <p className="text-xs text-indigo-400 font-semibold uppercase tracking-wider mb-1">How it works</p>
-              <p className="text-sm text-gray-300">Enter your own workflow stages and metrics. The AI will detect bottlenecks and give you specific recommendations — tailored to the selected industry.</p>
+              <p className="text-sm text-gray-300">Enter your own workflow stages and metrics. The AI detects bottlenecks and gives specific recommendations — tailored to the selected industry.</p>
             </div>
             <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
               <div className="flex rounded-lg bg-gray-800 p-1 mb-6 w-fit">
@@ -616,7 +748,6 @@ export default function Home() {
                   </button>
                 ))}
               </div>
-
               {inputMode === 'form' && (
                 <div className="space-y-3">
                   <div className="grid grid-cols-4 gap-2 text-xs text-gray-500 px-1">
@@ -633,11 +764,10 @@ export default function Home() {
                       </div>
                     </div>
                   ))}
-                  <p className="text-xs text-gray-600 px-1">e.g. stage: <span className="text-gray-500">{ex.stage}</span> · queue: <span className="text-gray-500">{ex.queue_size}</span> · proc. time: <span className="text-gray-500">{ex.processing_time_seconds}s</span> · throughput: <span className="text-gray-500">{ex.throughput}/hr</span></p>
+                  <p className="text-xs text-gray-600 px-1">e.g. stage: <span className="text-gray-500">{ex.stage}</span> · queue: <span className="text-gray-500">{ex.queue_size}</span> · proc: <span className="text-gray-500">{ex.processing_time_seconds}s</span> · throughput: <span className="text-gray-500">{ex.throughput}/hr</span></p>
                   <button onClick={addRow} className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors">+ Add stage</button>
                 </div>
               )}
-
               {inputMode === 'csv' && (
                 <div className="space-y-3">
                   <p className="text-xs text-gray-500">Format: <code className="text-gray-400">stage, queue_size, processing_time_seconds, throughput</code></p>
@@ -645,28 +775,21 @@ export default function Home() {
                   <button onClick={downloadTemplate} className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors">Download template CSV</button>
                 </div>
               )}
-
               <button onClick={analyzeCustom} disabled={customLoading} className="mt-5 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition-colors">
                 {customLoading ? <><svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" /></svg>Analyzing…</> : 'Analyze My Data'}
               </button>
-
-              {customRateLimit && <div className="mt-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-300 text-sm">⏳ <strong>AI rate limit reached.</strong> Please wait 60 seconds and try again.</div>}
+              {customRateLimit && <div className="mt-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-300 text-sm">⏳ Rate limit reached. Wait 60 seconds.</div>}
               {customError && <div className="mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">Error: {customError}</div>}
-
               {customResult && (
                 <div className="mt-4 space-y-4">
                   {customResult.detected_issues.length > 0 ? (
                     <div className="p-4 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
                       <p className="text-xs font-semibold text-yellow-400 uppercase tracking-wider mb-2">Detected Issues</p>
                       <ul className="space-y-1">
-                        {customResult.detected_issues.map((item, i) => (
-                          <li key={i} className="text-sm text-yellow-300"><span className="font-medium">{stageLabel(item.stage)}:</span> <span className="text-yellow-400/80">{item.issues.join(', ')}</span></li>
-                        ))}
+                        {customResult.detected_issues.map((item, i) => <li key={i} className="text-sm text-yellow-300"><span className="font-medium">{stageLabel(item.stage)}:</span> <span className="text-yellow-400/80">{item.issues.join(', ')}</span></li>)}
                       </ul>
                     </div>
-                  ) : (
-                    <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-sm">No threshold violations detected.</div>
-                  )}
+                  ) : <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-sm">No threshold violations detected.</div>}
                   <div className="p-4 rounded-lg bg-indigo-500/10 border border-indigo-500/20">
                     <p className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-2">AI Recommendations</p>
                     <p className="text-gray-300 text-sm whitespace-pre-wrap leading-relaxed">{customResult.ai_analysis}</p>
