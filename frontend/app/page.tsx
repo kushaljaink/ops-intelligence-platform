@@ -8,6 +8,7 @@ type Incident = {
   description: string
   status: string
   created_at: string
+  industry: string
 }
 
 type AnalysisState = {
@@ -30,11 +31,19 @@ type CustomResult = {
 
 const BACKEND = 'https://ops-intelligence-platform.onrender.com'
 
+const INDUSTRIES = [
+  { value: 'cruise',     label: 'Cruise Terminal' },
+  { value: 'healthcare', label: 'Healthcare' },
+  { value: 'banking',    label: 'Banking & Finance' },
+  { value: 'ecommerce',  label: 'E-commerce & Logistics' },
+  { value: 'airport',    label: 'Airport Operations' },
+  { value: 'custom',     label: 'Custom...' },
+]
+
 const CSV_TEMPLATE = `stage,queue_size,processing_time_seconds,throughput
-baggage_drop,12,45,120
-security_screening,67,380,8
-biometric_checkin,5,30,200
-boarding,20,60,90`
+stage_one,12,45,120
+stage_two,67,380,8
+stage_three,5,30,200`
 
 const emptyRow = (): WorkflowRow => ({
   stage: '',
@@ -49,6 +58,12 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null)
   const [analyses, setAnalyses] = useState<Record<string, AnalysisState>>({})
 
+  // Industry state
+  const [selectedIndustry, setSelectedIndustry] = useState('cruise')
+  const [customIndustry, setCustomIndustry] = useState('')
+  const industryValue = selectedIndustry === 'custom' ? customIndustry || 'operations' : selectedIndustry
+  const industryLabel = INDUSTRIES.find(i => i.value === selectedIndustry)?.label ?? customIndustry
+
   // Custom analysis state
   const [inputMode, setInputMode] = useState<'form' | 'csv'>('form')
   const [formRows, setFormRows] = useState<WorkflowRow[]>([emptyRow()])
@@ -57,8 +72,13 @@ export default function Home() {
   const [customResult, setCustomResult] = useState<CustomResult>(null)
   const [customError, setCustomError] = useState<string | null>(null)
 
+  // Fetch incidents when industry changes
   useEffect(() => {
-    fetch(`${BACKEND}/incidents`)
+    setLoading(true)
+    setError(null)
+    setIncidents([])
+    setAnalyses({})
+    fetch(`${BACKEND}/incidents?industry=${industryValue}`)
       .then(r => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         return r.json()
@@ -71,7 +91,7 @@ export default function Home() {
         setError(err.message)
         setLoading(false)
       })
-  }, [])
+  }, [industryValue])
 
   const analyzeIncident = async (id: string) => {
     setAnalyses(prev => ({ ...prev, [id]: { loading: true, result: null, error: null } }))
@@ -99,7 +119,12 @@ export default function Home() {
     if (lines.length < 2) return null
     return lines.slice(1).map(line => {
       const [stage, queue_size, processing_time_seconds, throughput] = line.split(',')
-      return { stage: stage?.trim() ?? '', queue_size: queue_size?.trim() ?? '', processing_time_seconds: processing_time_seconds?.trim() ?? '', throughput: throughput?.trim() ?? '' }
+      return {
+        stage: stage?.trim() ?? '',
+        queue_size: queue_size?.trim() ?? '',
+        processing_time_seconds: processing_time_seconds?.trim() ?? '',
+        throughput: throughput?.trim() ?? '',
+      }
     })
   }
 
@@ -111,12 +136,13 @@ export default function Home() {
     setCustomError(null)
     try {
       const payload = {
+        industry: industryValue,
         rows: rows.map(r => ({
           stage: r.stage,
           queue_size: parseFloat(r.queue_size) || 0,
           processing_time_seconds: parseFloat(r.processing_time_seconds) || 0,
           throughput: parseFloat(r.throughput) || 0,
-        }))
+        })),
       }
       const r = await fetch(`${BACKEND}/analyze-custom`, {
         method: 'POST',
@@ -156,9 +182,42 @@ export default function Home() {
       <div className="max-w-7xl mx-auto">
 
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">Ops Intelligence Platform</h1>
-          <p className="text-gray-400">CruiseOps AI — Live incident monitoring</p>
+        <div className="mb-6 flex items-start justify-between flex-wrap gap-4">
+          <div>
+            <h1 className="text-3xl font-bold mb-1">Ops Intelligence Platform</h1>
+            <p className="text-gray-400">
+              {selectedIndustry === 'custom' && customIndustry
+                ? `${customIndustry.charAt(0).toUpperCase() + customIndustry.slice(1)} Operations`
+                : industryLabel
+              } — Live incident monitoring
+            </p>
+          </div>
+
+          {/* Industry selector */}
+          <div className="flex items-center gap-3">
+            <label className="text-sm text-gray-400 whitespace-nowrap">Industry:</label>
+            <select
+              value={selectedIndustry}
+              onChange={e => {
+                setSelectedIndustry(e.target.value)
+                setCustomResult(null)
+                setCustomError(null)
+              }}
+              className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+            >
+              {INDUSTRIES.map(i => (
+                <option key={i.value} value={i.value}>{i.label}</option>
+              ))}
+            </select>
+            {selectedIndustry === 'custom' && (
+              <input
+                value={customIndustry}
+                onChange={e => setCustomIndustry(e.target.value)}
+                placeholder="e.g. retail, manufacturing..."
+                className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500 w-48"
+              />
+            )}
+          </div>
         </div>
 
         {/* Stats bar */}
@@ -191,6 +250,10 @@ export default function Home() {
               <p className="text-gray-400">Loading incidents...</p>
             ) : error ? (
               <p className="text-red-400">Failed to load incidents: {error}</p>
+            ) : incidents.length === 0 ? (
+              <div className="bg-gray-900 rounded-xl p-6 border border-gray-800 text-gray-500 text-sm">
+                No incidents found for this industry.
+              </div>
             ) : (
               <div className="space-y-4">
                 {incidents.map(incident => {
@@ -329,7 +392,7 @@ export default function Home() {
                   <textarea
                     value={csvText}
                     onChange={e => setCsvText(e.target.value)}
-                    placeholder={`stage,queue_size,processing_time_seconds,throughput\nbaggage_drop,12,45,120\nsecurity,67,380,8`}
+                    placeholder={`stage,queue_size,processing_time_seconds,throughput\nstage_one,12,45,120\nstage_two,67,380,8`}
                     rows={7}
                     className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 font-mono focus:outline-none focus:border-indigo-500 resize-none"
                   />
@@ -367,7 +430,7 @@ export default function Home() {
               )}
               {customResult && (
                 <div className="mt-4 space-y-4">
-                  {customResult.detected_issues.length > 0 && (
+                  {customResult.detected_issues.length > 0 ? (
                     <div className="p-4 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
                       <p className="text-xs font-semibold text-yellow-400 uppercase tracking-wider mb-2">Detected Issues</p>
                       <ul className="space-y-1">
@@ -379,8 +442,7 @@ export default function Home() {
                         ))}
                       </ul>
                     </div>
-                  )}
-                  {customResult.detected_issues.length === 0 && (
+                  ) : (
                     <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-sm">
                       No threshold violations detected across all stages.
                     </div>
