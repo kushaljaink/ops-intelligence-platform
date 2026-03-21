@@ -40,6 +40,39 @@ const INDUSTRIES = [
   { value: 'custom',     label: 'Custom...' },
 ]
 
+const INDUSTRY_CONTEXT: Record<string, { scenario: string; what: string; example: WorkflowRow }> = {
+  cruise: {
+    scenario: 'A cruise terminal processing 3,000 passengers for embarkation',
+    what: 'Each incident represents a boarding workflow stage where metrics have breached operational thresholds — triggering an alert.',
+    example: { stage: 'baggage_drop', queue_size: '65', processing_time_seconds: '420', throughput: '6' },
+  },
+  healthcare: {
+    scenario: 'A hospital emergency department during a high-demand shift',
+    what: 'Each incident represents a patient flow stage where wait times or throughput have exceeded safe operational limits.',
+    example: { stage: 'patient_triage', queue_size: '28', processing_time_seconds: '180', throughput: '8' },
+  },
+  banking: {
+    scenario: 'A retail bank processing loan applications during peak season',
+    what: 'Each incident represents a processing stage where backlog or SLA thresholds have been breached.',
+    example: { stage: 'loan_verification', queue_size: '140', processing_time_seconds: '720', throughput: '3' },
+  },
+  ecommerce: {
+    scenario: 'A fulfilment warehouse during a high-volume sales event',
+    what: 'Each incident represents a fulfilment stage where pick rates, dispatch times, or queue sizes have hit critical levels.',
+    example: { stage: 'warehouse_picking', queue_size: '320', processing_time_seconds: '250', throughput: '30' },
+  },
+  airport: {
+    scenario: 'An international airport terminal during morning peak hours',
+    what: 'Each incident represents a passenger processing stage where throughput or wait times have exceeded safe thresholds.',
+    example: { stage: 'security_screening', queue_size: '95', processing_time_seconds: '300', throughput: '14' },
+  },
+  custom: {
+    scenario: 'A live operational workflow with active threshold breaches',
+    what: 'Each incident represents a stage in your workflow where metrics have exceeded normal operating limits.',
+    example: { stage: 'your_stage', queue_size: '75', processing_time_seconds: '350', throughput: '6' },
+  },
+}
+
 const CSV_TEMPLATE = `stage,queue_size,processing_time_seconds,throughput
 stage_one,12,45,120
 stage_two,67,380,8
@@ -63,6 +96,7 @@ export default function Home() {
   const [customIndustry, setCustomIndustry] = useState('')
   const industryValue = selectedIndustry === 'custom' ? customIndustry || 'operations' : selectedIndustry
   const industryLabel = INDUSTRIES.find(i => i.value === selectedIndustry)?.label ?? customIndustry
+  const context = INDUSTRY_CONTEXT[selectedIndustry] ?? INDUSTRY_CONTEXT['custom']
 
   // Custom analysis state
   const [inputMode, setInputMode] = useState<'form' | 'csv'>('form')
@@ -72,7 +106,6 @@ export default function Home() {
   const [customResult, setCustomResult] = useState<CustomResult>(null)
   const [customError, setCustomError] = useState<string | null>(null)
 
-  // Fetch incidents when industry changes
   useEffect(() => {
     setLoading(true)
     setError(null)
@@ -177,6 +210,8 @@ export default function Home() {
   const stageLabel = (stage: string) =>
     stage.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
 
+  const ex = context.example
+
   return (
     <main className="min-h-screen bg-gray-950 text-white p-8">
       <div className="max-w-7xl mx-auto">
@@ -202,6 +237,7 @@ export default function Home() {
                 setSelectedIndustry(e.target.value)
                 setCustomResult(null)
                 setCustomError(null)
+                setFormRows([emptyRow()])
               }}
               className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
             >
@@ -243,9 +279,17 @@ export default function Home() {
         {/* Two-column layout */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
 
-          {/* LEFT — Active Incidents */}
+          {/* LEFT — Demo Incidents */}
           <div>
-            <h2 className="text-lg font-semibold mb-4">Active Incidents</h2>
+            <h2 className="text-lg font-semibold mb-3">Live Demo — Active Incidents</h2>
+
+            {/* Context banner */}
+            <div className="bg-gray-800/60 border border-gray-700 rounded-lg px-4 py-3 mb-4">
+              <p className="text-xs text-indigo-400 font-semibold uppercase tracking-wider mb-1">Demo Scenario</p>
+              <p className="text-sm text-gray-300 mb-1">{context.scenario}</p>
+              <p className="text-xs text-gray-500">{context.what}</p>
+            </div>
+
             {loading ? (
               <p className="text-gray-400">Loading incidents...</p>
             ) : error ? (
@@ -308,7 +352,14 @@ export default function Home() {
 
           {/* RIGHT — Try With Your Data */}
           <div>
-            <h2 className="text-lg font-semibold mb-4">Try With Your Data</h2>
+            <h2 className="text-lg font-semibold mb-3">Try With Your Data</h2>
+
+            {/* How it works banner */}
+            <div className="bg-gray-800/60 border border-gray-700 rounded-lg px-4 py-3 mb-4">
+              <p className="text-xs text-indigo-400 font-semibold uppercase tracking-wider mb-1">How it works</p>
+              <p className="text-sm text-gray-300">Enter your own workflow stages and metrics. The AI will detect bottlenecks and give you specific recommendations — tailored to the selected industry.</p>
+            </div>
+
             <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
 
               {/* Mode toggle */}
@@ -340,30 +391,30 @@ export default function Home() {
                       <input
                         value={row.stage}
                         onChange={e => updateRow(i, 'stage', e.target.value)}
-                        placeholder="e.g. security"
-                        className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                        placeholder={ex.stage}
+                        className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500"
                       />
                       <input
                         type="number"
                         value={row.queue_size}
                         onChange={e => updateRow(i, 'queue_size', e.target.value)}
-                        placeholder="0"
-                        className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                        placeholder={ex.queue_size}
+                        className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500"
                       />
                       <input
                         type="number"
                         value={row.processing_time_seconds}
                         onChange={e => updateRow(i, 'processing_time_seconds', e.target.value)}
-                        placeholder="0"
-                        className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                        placeholder={ex.processing_time_seconds}
+                        className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500"
                       />
                       <div className="flex gap-2">
                         <input
                           type="number"
                           value={row.throughput}
                           onChange={e => updateRow(i, 'throughput', e.target.value)}
-                          placeholder="0"
-                          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500 w-full"
+                          placeholder={ex.throughput}
+                          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 w-full"
                         />
                         {formRows.length > 1 && (
                           <button
@@ -374,6 +425,9 @@ export default function Home() {
                       </div>
                     </div>
                   ))}
+                  <p className="text-xs text-gray-600 px-1 mt-1">
+                    e.g. stage: <span className="text-gray-500">{ex.stage}</span> · queue: <span className="text-gray-500">{ex.queue_size}</span> · proc. time: <span className="text-gray-500">{ex.processing_time_seconds}s</span> · throughput: <span className="text-gray-500">{ex.throughput}/hr</span>
+                  </p>
                   <button
                     onClick={addRow}
                     className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors mt-1"
@@ -392,7 +446,7 @@ export default function Home() {
                   <textarea
                     value={csvText}
                     onChange={e => setCsvText(e.target.value)}
-                    placeholder={`stage,queue_size,processing_time_seconds,throughput\nstage_one,12,45,120\nstage_two,67,380,8`}
+                    placeholder={`stage,queue_size,processing_time_seconds,throughput\n${ex.stage},${ex.queue_size},${ex.processing_time_seconds},${ex.throughput}`}
                     rows={7}
                     className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 font-mono focus:outline-none focus:border-indigo-500 resize-none"
                   />
