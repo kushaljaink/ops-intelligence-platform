@@ -506,29 +506,55 @@ export default function Home() {
       <div className="max-w-7xl mx-auto">
 
         {/* Header */}
-        <div className="mb-8 flex items-center justify-between flex-wrap gap-4">
-          <div>
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-2 h-8 bg-indigo-500 rounded-full" />
-              <h1 className="text-4xl font-extrabold tracking-tight">Ops Intelligence Platform</h1>
+        <div className="mb-6">
+          <div className="flex items-start justify-between gap-4 mb-4">
+            <div>
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-2 h-8 bg-indigo-500 rounded-full" />
+                <h1 className="text-4xl font-extrabold tracking-tight">Ops Intelligence Platform</h1>
+              </div>
+              <p className="text-gray-400 text-base ml-5">AI-powered workflow monitoring & bottleneck detection — <span className="text-indigo-400 font-medium">{selectedIndustry === 'custom' && customIndustry ? `${customIndustry.charAt(0).toUpperCase() + customIndustry.slice(1)} Operations` : industryLabel}</span></p>
             </div>
-            <p className="text-gray-400 text-base ml-5">AI-powered workflow monitoring & bottleneck detection — <span className="text-indigo-400 font-medium">{selectedIndustry === 'custom' && customIndustry ? `${customIndustry.charAt(0).toUpperCase() + customIndustry.slice(1)} Operations` : industryLabel}</span></p>
-          </div>
-          <div className="flex items-center gap-3">
             <button
               onClick={() => setShowAbout(true)}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 text-sm text-white font-semibold transition-colors shadow-lg shadow-indigo-500/30"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 text-sm text-white font-semibold transition-colors shadow-lg shadow-indigo-500/30 shrink-0"
             >
               <span>ℹ</span>
               <span>About</span>
             </button>
-            <div className="flex items-center gap-3 bg-gray-800 border border-indigo-500/40 rounded-xl px-4 py-2.5">
-              <label className="text-sm text-indigo-400 font-semibold whitespace-nowrap">Industry:</label>
-              <select value={selectedIndustry} onChange={e => { setSelectedIndustry(e.target.value); setCustomResult(null); setCustomError(null); setFormRows([emptyRow()]) }} className="bg-transparent text-white text-sm font-semibold focus:outline-none cursor-pointer">
-                {INDUSTRIES.map(i => (<option key={i.value} value={i.value} className="bg-gray-800">{i.label}</option>))}
-              </select>
-              {selectedIndustry === 'custom' && <input value={customIndustry} onChange={e => setCustomIndustry(e.target.value)} placeholder="e.g. retail..." className="bg-transparent border-l border-gray-600 pl-3 text-sm text-white placeholder-gray-500 focus:outline-none w-40" />}
-            </div>
+          </div>
+          <div className="flex flex-wrap gap-2 ml-5">
+            {INDUSTRIES.filter(i => i.value !== 'custom').map(i => (
+              <button
+                key={i.value}
+                onClick={() => { setSelectedIndustry(i.value); setCustomResult(null); setCustomError(null); setFormRows([emptyRow()]) }}
+                className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+                  selectedIndustry === i.value
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/30'
+                    : 'bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700 border border-gray-700'
+                }`}
+              >
+                {i.label}
+              </button>
+            ))}
+            <button
+              onClick={() => { setSelectedIndustry('custom'); setCustomResult(null); setCustomError(null); setFormRows([emptyRow()]) }}
+              className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+                selectedIndustry === 'custom'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/30'
+                  : 'bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700 border border-gray-700'
+              }`}
+            >
+              Custom…
+            </button>
+            {selectedIndustry === 'custom' && (
+              <input
+                value={customIndustry}
+                onChange={e => setCustomIndustry(e.target.value)}
+                placeholder="e.g. retail..."
+                className="bg-gray-800 border border-gray-600 rounded-full px-4 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 w-40"
+              />
+            )}
           </div>
         </div>
 
