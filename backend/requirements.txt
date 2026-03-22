@@ -15,6 +15,7 @@ cryptography==46.0.5
 dataclasses-json==0.6.7
 deprecation==2.1.0
 distro==1.9.0
+et_xmlfile==2.0.0
 fastapi==0.135.1
 frozenlist==1.8.0
 fsspec==2026.2.0
@@ -45,6 +46,7 @@ mmh3==5.2.1
 multidict==6.7.1
 mypy_extensions==1.1.0
 numpy==2.4.3
+openpyxl==3.1.5
 orjson==3.11.7
 ormsgpack==1.12.2
 packaging==24.2

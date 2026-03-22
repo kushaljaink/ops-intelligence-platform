@@ -23,6 +23,15 @@ type WhatIfResult = { stage: string; change_description: string; current: { queu
 type ResolutionEffectiveness = { stage: string; total_incidents: number; resolved: number; open: number; high_severity: number; resolution_rate: number; avg_resolution_minutes: number | null; avg_gap_hours: number | null; is_recurring: boolean; effectiveness: string; most_common_action: string | null; insight: string }
 type Playbook = { stage: string; playbook: string; data_summary: { total_incidents: number; resolution_rate: number; actions_recorded: number; best_actions: string[]; generated_at: string } } | null
 type OutcomeResult = { success: boolean; action_category: string; health_before: number | null; health_after: number | null; improvement: number | null } | null
+type UploadResult = {
+  filename: string
+  rows_extracted: number
+  column_mapping: Record<string, string>
+  notes: string
+  detected_issues: { stage: string; issues: string[] }[]
+  ai_analysis: string
+  rows: { stage: string; queue_size: number; processing_time_seconds: number; throughput: number }[]
+} | null
 
 type AgentStep = {
   step: number
@@ -154,6 +163,15 @@ export default function Home() {
   const [customResult, setCustomResult] = useState<CustomResult>(null)
   const [customError, setCustomError] = useState<string | null>(null)
   const [customRateLimit, setCustomRateLimit] = useState(false)
+
+  // Upload
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [uploadLoading, setUploadLoading] = useState(false)
+  const [uploadResult, setUploadResult] = useState<UploadResult>(null)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [uploadRateLimit, setUploadRateLimit] = useState(false)
+  const [showGuide, setShowGuide] = useState(false)
+  const [activeInputTab, setActiveInputTab] = useState<'form' | 'csv' | 'upload'>('form')
 
   // Agent
   const [agentRunning, setAgentRunning] = useState(false)
@@ -356,6 +374,28 @@ export default function Home() {
       const [stage, queue_size, processing_time_seconds, throughput] = line.split(',')
       return { stage: stage?.trim() ?? '', queue_size: queue_size?.trim() ?? '', processing_time_seconds: processing_time_seconds?.trim() ?? '', throughput: throughput?.trim() ?? '' }
     })
+  }
+
+  const analyzeUpload = async () => {
+    if (!uploadFile) return
+    setUploadLoading(true)
+    setUploadResult(null)
+    setUploadError(null)
+    setUploadRateLimit(false)
+    try {
+      const formData = new FormData()
+      formData.append('file', uploadFile)
+      formData.append('industry', industryValue)
+      const r = await fetch(`${BACKEND}/extract-and-analyze`, { method: 'POST', body: formData })
+      const d = await r.json()
+      if (r.status === 429 || d.detail?.startsWith('GROQ_RATE_LIMIT')) { setUploadRateLimit(true); return }
+      if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`)
+      setUploadResult(d)
+    } catch (err: unknown) {
+      setUploadError(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setUploadLoading(false)
+    }
   }
 
   const analyzeCustom = async () => {
@@ -980,15 +1020,61 @@ export default function Home() {
             <h2 className="text-lg font-semibold mb-3">Try With Your Data</h2>
             <div className="bg-gray-800/60 border border-gray-700 rounded-lg px-4 py-3 mb-4">
               <p className="text-xs text-indigo-400 font-semibold uppercase tracking-wider mb-1">How it works</p>
-              <p className="text-sm text-gray-300">Enter your own workflow stages and metrics. The AI detects bottlenecks and gives specific recommendations — tailored to the selected industry.</p>
+              <p className="text-sm text-gray-300">Enter your workflow stages and metrics, or upload any Excel/CSV — the AI will automatically map your columns and analyze your data.</p>
             </div>
+
+            <button onClick={() => setShowGuide(prev => !prev)} className="flex items-center gap-2 text-xs text-indigo-400 hover:text-indigo-300 transition-colors mb-3">
+              <span>{showGuide ? '▲' : '▼'}</span>
+              What data do I need? What columns should my file have?
+            </button>
+
+            {showGuide && (
+              <div className="mb-4 p-4 rounded-xl bg-gray-800 border border-gray-700 space-y-3">
+                <p className="text-xs font-semibold text-white">Your file or form needs 4 things per stage:</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-3 rounded-lg bg-gray-700/50">
+                    <p className="text-xs font-semibold text-indigo-400 mb-1">Stage Name</p>
+                    <p className="text-xs text-gray-400">The name of the workflow step</p>
+                    <p className="text-xs text-gray-500 mt-1">e.g. security_check, triage, loan_review</p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-gray-700/50">
+                    <p className="text-xs font-semibold text-yellow-400 mb-1">Queue Size</p>
+                    <p className="text-xs text-gray-400">How many items are waiting</p>
+                    <p className="text-xs text-gray-500 mt-1">e.g. patients waiting, orders in backlog</p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-gray-700/50">
+                    <p className="text-xs font-semibold text-orange-400 mb-1">Processing Time (seconds)</p>
+                    <p className="text-xs text-gray-400">How long each item takes to process</p>
+                    <p className="text-xs text-gray-500 mt-1">e.g. avg handle time, cycle time</p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-gray-700/50">
+                    <p className="text-xs font-semibold text-green-400 mb-1">Throughput (per hour)</p>
+                    <p className="text-xs text-gray-400">How many items complete per hour</p>
+                    <p className="text-xs text-gray-500 mt-1">e.g. loans approved/hr, orders shipped/hr</p>
+                  </div>
+                </div>
+                <div className="border-t border-gray-700 pt-3">
+                  <p className="text-xs font-semibold text-gray-400 mb-2">Industry examples:</p>
+                  <div className="space-y-1 text-xs text-gray-500">
+                    <p><span className="text-gray-300">Healthcare:</span> Stage=triage · Queue=28 · Processing=180s · Throughput=8/hr</p>
+                    <p><span className="text-gray-300">Banking:</span> Stage=loan_review · Queue=140 · Processing=720s · Throughput=3/hr</p>
+                    <p><span className="text-gray-300">Construction:</span> Stage=site_inspection · Queue=8 · Processing=320s · Throughput=1/hr</p>
+                  </div>
+                </div>
+                <p className="text-xs text-gray-600">💡 If you upload a file, the AI will automatically figure out which of your columns map to these fields — your columns don't need to be named exactly this way.</p>
+              </div>
+            )}
+
             <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
               <div className="flex rounded-lg bg-gray-800 p-1 mb-6 w-fit">
-                {(['form', 'csv'] as const).map(mode => (
-                  <button key={mode} onClick={() => { setInputMode(mode); setCustomResult(null); setCustomError(null) }} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${inputMode === mode ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`}>{mode === 'form' ? 'Simple Form' : 'Paste CSV'}</button>
+                {(['form', 'csv', 'upload'] as const).map(mode => (
+                  <button key={mode} onClick={() => { setActiveInputTab(mode); setCustomResult(null); setCustomError(null); setUploadResult(null); setUploadError(null) }} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${activeInputTab === mode ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+                    {mode === 'form' ? 'Simple Form' : mode === 'csv' ? 'Paste CSV' : '📁 Upload File'}
+                  </button>
                 ))}
               </div>
-              {inputMode === 'form' && (
+
+              {activeInputTab === 'form' && (
                 <div className="space-y-3">
                   <div className="grid grid-cols-4 gap-2 text-xs text-gray-500 px-1"><span>Stage</span><span>Queue size</span><span>Proc. time (s)</span><span>Throughput/hr</span></div>
                   {formRows.map((row, i) => (
@@ -1006,26 +1092,106 @@ export default function Home() {
                   <button onClick={addRow} className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors">+ Add stage</button>
                 </div>
               )}
-              {inputMode === 'csv' && (
+
+              {activeInputTab === 'csv' && (
                 <div className="space-y-3">
                   <p className="text-xs text-gray-500">Format: <code className="text-gray-400">stage, queue_size, processing_time_seconds, throughput</code></p>
                   <textarea value={csvText} onChange={e => setCsvText(e.target.value)} placeholder={`stage,queue_size,processing_time_seconds,throughput\n${ex.stage},${ex.queue_size},${ex.processing_time_seconds},${ex.throughput}`} rows={7} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 font-mono focus:outline-none focus:border-indigo-500 resize-none" />
                   <button onClick={downloadTemplate} className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors">Download template CSV</button>
                 </div>
               )}
-              <button onClick={analyzeCustom} disabled={customLoading} className="mt-5 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition-colors">
-                {customLoading ? <><svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" /></svg>Analyzing…</> : 'Analyze My Data'}
-              </button>
-              {customRateLimit && <div className="mt-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-300 text-sm">⏳ Rate limit reached. Wait 60 seconds.</div>}
+
+              {activeInputTab === 'upload' && (
+                <div className="space-y-4">
+                  <div
+                    className="border-2 border-dashed border-gray-700 rounded-xl p-8 text-center hover:border-indigo-500/50 transition-colors cursor-pointer"
+                    onClick={() => document.getElementById('file-upload')?.click()}
+                    onDragOver={e => e.preventDefault()}
+                    onDrop={e => { e.preventDefault(); const file = e.dataTransfer.files[0]; if (file) setUploadFile(file) }}
+                  >
+                    <input id="file-upload" type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={e => { const file = e.target.files?.[0]; if (file) setUploadFile(file) }} />
+                    <div className="text-3xl mb-2">📁</div>
+                    {uploadFile ? (
+                      <div>
+                        <p className="text-sm font-medium text-white">{uploadFile.name}</p>
+                        <p className="text-xs text-gray-500 mt-1">{(uploadFile.size / 1024).toFixed(1)} KB · Click to change</p>
+                      </div>
+                    ) : (
+                      <div>
+                        <p className="text-sm text-gray-300 mb-1">Drop your file here or click to browse</p>
+                        <p className="text-xs text-gray-500">Supports CSV, Excel (.xlsx, .xls)</p>
+                        <p className="text-xs text-gray-600 mt-2">The AI will automatically map your columns — no specific format required</p>
+                      </div>
+                    )}
+                  </div>
+                  {uploadFile && (
+                    <div className="p-3 rounded-lg bg-indigo-500/5 border border-indigo-500/20 text-xs text-gray-400 space-y-1">
+                      <p className="font-semibold text-indigo-400 mb-1">What happens next:</p>
+                      <p>1. Your file is sent to the AI</p>
+                      <p>2. AI identifies which columns are stage / queue / processing time / throughput</p>
+                      <p>3. Extracts the data and runs threshold analysis</p>
+                      <p>4. Returns bottleneck detection and recommendations</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {(activeInputTab === 'form' || activeInputTab === 'csv') && (
+                <button onClick={analyzeCustom} disabled={customLoading} className="mt-5 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition-colors">
+                  {customLoading ? <><svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" /></svg>Analyzing…</> : 'Analyze My Data'}
+                </button>
+              )}
+
+              {activeInputTab === 'upload' && (
+                <button onClick={analyzeUpload} disabled={uploadLoading || !uploadFile} className="mt-5 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition-colors">
+                  {uploadLoading ? <><svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" /></svg>AI is reading your file…</> : '🤖 Upload & Analyze with AI'}
+                </button>
+              )}
+
+              {(customRateLimit || uploadRateLimit) && <div className="mt-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-300 text-sm">⏳ Rate limit reached. Wait 60 seconds and try again.</div>}
               {customError && <div className="mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">Error: {customError}</div>}
+              {uploadError && <div className="mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">Error: {uploadError}</div>}
+
+              {uploadResult && (
+                <div className="mt-4 space-y-4">
+                  <div className="p-3 rounded-lg bg-gray-800 border border-gray-700">
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">AI Column Mapping — {uploadResult.filename}</p>
+                    <div className="grid grid-cols-2 gap-2 text-xs mb-2">
+                      {Object.entries(uploadResult.column_mapping).map(([field, col]) => (
+                        <div key={field} className="flex items-center gap-2">
+                          <span className="text-gray-500 capitalize">{field.replace(/_/g, ' ')}:</span>
+                          <span className="text-indigo-400 font-medium">"{col}"</span>
+                        </div>
+                      ))}
+                    </div>
+                    {uploadResult.notes && <p className="text-xs text-gray-600 italic">{uploadResult.notes}</p>}
+                    <p className="text-xs text-gray-600 mt-1">{uploadResult.rows_extracted} rows extracted</p>
+                  </div>
+                  {uploadResult.detected_issues.length > 0 ? (
+                    <div className="p-4 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+                      <p className="text-xs font-semibold text-yellow-400 uppercase tracking-wider mb-2">Detected Issues</p>
+                      <ul className="space-y-1">{uploadResult.detected_issues.map((item, i) => (<li key={i} className="text-sm text-yellow-300"><span className="font-medium">{item.stage.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}:</span> <span className="text-yellow-400/80">{item.issues.join(', ')}</span></li>))}</ul>
+                    </div>
+                  ) : (
+                    <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-sm">No threshold violations detected.</div>
+                  )}
+                  <div className="p-4 rounded-lg bg-indigo-500/10 border border-indigo-500/20">
+                    <p className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-2">AI Recommendations</p>
+                    <p className="text-gray-300 text-sm whitespace-pre-wrap leading-relaxed">{uploadResult.ai_analysis}</p>
+                  </div>
+                </div>
+              )}
+
               {customResult && (
                 <div className="mt-4 space-y-4">
                   {customResult.detected_issues.length > 0 ? (
                     <div className="p-4 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
                       <p className="text-xs font-semibold text-yellow-400 uppercase tracking-wider mb-2">Detected Issues</p>
-                      <ul className="space-y-1">{customResult.detected_issues.map((item, i) => <li key={i} className="text-sm text-yellow-300"><span className="font-medium">{stageLabel(item.stage)}:</span> <span className="text-yellow-400/80">{item.issues.join(', ')}</span></li>)}</ul>
+                      <ul className="space-y-1">{customResult.detected_issues.map((item, i) => (<li key={i} className="text-sm text-yellow-300"><span className="font-medium">{stageLabel(item.stage)}:</span> <span className="text-yellow-400/80">{item.issues.join(', ')}</span></li>))}</ul>
                     </div>
-                  ) : <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-sm">No threshold violations detected.</div>}
+                  ) : (
+                    <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-sm">No threshold violations detected.</div>
+                  )}
                   <div className="p-4 rounded-lg bg-indigo-500/10 border border-indigo-500/20">
                     <p className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-2">AI Recommendations</p>
                     <p className="text-gray-300 text-sm whitespace-pre-wrap leading-relaxed">{customResult.ai_analysis}</p>

@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi import UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from pydantic import BaseModel
@@ -6,6 +7,8 @@ from typing import List, Optional
 import os
 import re
 import httpx
+import io
+import csv
 from supabase import create_client
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
@@ -828,6 +831,122 @@ async def analyze_custom(body: AnalyzeCustomRequest):
     prompt = f"Senior ops analyst. {body.industry}.\nWorkflow:\n{rows_text}\nViolations:\n{issues_text}\n1. Worst bottleneck with numbers\n2. Cascade impact\n3. 3 actions in 30 min."
     ai_analysis = await call_groq(prompt)
     return {"detected_issues": issues, "ai_analysis": ai_analysis}
+
+
+@app.post("/extract-and-analyze")
+async def extract_and_analyze(
+    file: UploadFile = File(...),
+    industry: str = Form(default="operations"),
+):
+    filename = file.filename or ""
+    content_type = file.content_type or ""
+    raw_bytes = await file.read()
+    csv_text = ""
+
+    if filename.endswith(".csv") or "csv" in content_type:
+        try:
+            csv_text = raw_bytes.decode("utf-8", errors="replace")
+        except Exception:
+            raise HTTPException(status_code=400, detail="Could not read CSV file.")
+    elif filename.endswith((".xlsx", ".xls")) or "excel" in content_type or "spreadsheet" in content_type:
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(io.BytesIO(raw_bytes), read_only=True)
+            ws = wb.active
+            rows = []
+            for i, row in enumerate(ws.iter_rows(values_only=True)):
+                if i > 200:
+                    break
+                rows.append(",".join(str(c) if c is not None else "" for c in row))
+            csv_text = "\n".join(rows)
+        except ImportError:
+            raise HTTPException(status_code=500, detail="openpyxl not installed.")
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Could not read Excel file: {str(e)}")
+    else:
+        try:
+            csv_text = raw_bytes.decode("utf-8", errors="replace")
+        except Exception:
+            raise HTTPException(status_code=400, detail="Unsupported file format. Please upload CSV or Excel.")
+
+    if not csv_text.strip():
+        raise HTTPException(status_code=400, detail="File appears to be empty.")
+
+    lines = csv_text.strip().split("\n")
+    preview = "\n".join(lines[:100])
+    thresholds = INDUSTRY_THRESHOLDS.get(industry, {"queue": 50, "processing": 300, "throughput": 10})
+
+    extraction_prompt = f"""You are a data analyst. A user uploaded a file with operational workflow data for a {industry} operation.
+
+Raw file content (first 100 rows):
+{preview}
+
+Your job:
+1. Identify which columns correspond to: stage name, queue size, processing time (in seconds), throughput (per hour)
+2. If processing time is in minutes, convert to seconds. If throughput is per day, convert to per hour.
+3. Extract data rows and return ONLY valid JSON in this exact format with no explanation or markdown:
+
+{{"column_mapping": {{"stage": "col name", "queue_size": "col name", "processing_time_seconds": "col name", "throughput": "col name"}}, "rows": [{{"stage": "name", "queue_size": 0.0, "processing_time_seconds": 0.0, "throughput": 0.0}}], "notes": "observations about the data"}}
+
+Extract up to 20 rows. Return ONLY the JSON object."""
+
+    extraction_response = await call_groq(extraction_prompt, max_tokens=1500)
+
+    import json as _j
+    import re as _re
+    clean = extraction_response.strip()
+    clean = _re.sub(r'^```(?:json)?\s*', '', clean)
+    clean = _re.sub(r'\s*```$', '', clean)
+    clean = clean.strip()
+
+    try:
+        extracted = _j.loads(clean)
+    except Exception:
+        match = _re.search(r'\{.*\}', clean, _re.DOTALL)
+        if match:
+            try:
+                extracted = _j.loads(match.group())
+            except Exception:
+                raise HTTPException(status_code=422, detail="AI could not parse your file. Please ensure it has column headers and data rows.")
+        else:
+            raise HTTPException(status_code=422, detail="AI could not parse your file. Please ensure it has column headers and data rows.")
+
+    rows_data = extracted.get("rows", [])
+    column_mapping = extracted.get("column_mapping", {})
+    notes = extracted.get("notes", "")
+
+    if not rows_data:
+        raise HTTPException(status_code=422, detail="No data rows could be extracted from your file.")
+
+    issues = []
+    for r in rows_data:
+        stage = str(r.get("stage", "unknown"))
+        queue = float(r.get("queue_size", 0) or 0)
+        processing = float(r.get("processing_time_seconds", 0) or 0)
+        throughput = float(r.get("throughput", 0) or 0)
+        row_issues = []
+        if queue > thresholds["queue"]:
+            row_issues.append(f"queue backed up ({queue} items, threshold: {thresholds['queue']})")
+        if processing > thresholds["processing"]:
+            row_issues.append(f"processing time too high ({processing}s, threshold: {thresholds['processing']}s)")
+        if throughput > 0 and throughput < thresholds["throughput"]:
+            row_issues.append(f"throughput critically low ({throughput}/hr, threshold: {thresholds['throughput']}/hr)")
+        if row_issues:
+            issues.append({"stage": stage, "issues": row_issues})
+
+    rows_text = "\n".join(f"- Stage: {r.get('stage')} | Queue: {r.get('queue_size')} | Processing: {r.get('processing_time_seconds')}s | Throughput: {r.get('throughput')}/hr" for r in rows_data)
+    issues_text = "\n".join(f"- {i['stage']}: {', '.join(i['issues'])}" for i in issues) if issues else "No threshold violations detected."
+
+    analysis_prompt = (
+        f"Senior ops analyst. A {industry} team uploaded their operational data.\n\n"
+        f"Extracted data ({len(rows_data)} rows):\n{rows_text}\n\n"
+        f"Violations:\n{issues_text}\n\n"
+        f"Column interpretation: {notes}\n\n"
+        "1. Worst bottleneck with actual numbers\n2. Cascade impact\n3. 3 specific actions in next 30 min. No generic advice."
+    )
+    ai_analysis = await call_groq(analysis_prompt, max_tokens=600)
+
+    return {"success": True, "filename": filename, "rows_extracted": len(rows_data), "column_mapping": column_mapping, "notes": notes, "detected_issues": issues, "ai_analysis": ai_analysis, "rows": rows_data}
 
 
 class WebhookEvent(BaseModel):
