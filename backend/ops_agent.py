@@ -226,13 +226,26 @@ def build_agent(supabase: Client, groq_api_key: str, industry: str) -> AgentExec
         max_tokens=1000,
     )
     tools = build_agent_tools(supabase, groq_api_key, industry)
+
     prompt = ChatPromptTemplate.from_messages([
-        ("system", f"""You are an AI operations intelligence agent investigating a {industry} operation. Check health scores first, then cascade risks and open incidents. For critical stages check patterns and ETA. Prioritize findings by urgency and end with a prioritized action list."""),
+        ("system", f"""You are an AI operations intelligence agent investigating a {industry} operation.
+Check health scores first, then cascade risks and open incidents.
+For any critical or severe stage, check its recurring patterns and ETA to breach.
+Prioritize findings by urgency. End with a structured action list for the ops team.
+Use actual numbers and stage names. Be specific."""),
         ("human", "{input}"),
-        ("placeholder", "{agent_scratchpad}"),
+        MessagesPlaceholder(variable_name="agent_scratchpad"),
     ])
+
     agent = create_tool_calling_agent(llm, tools, prompt)
-    return AgentExecutor(agent=agent, tools=tools, verbose=True, max_iterations=8, return_intermediate_steps=True)
+    return AgentExecutor(
+        agent=agent,
+        tools=tools,
+        verbose=True,
+        max_iterations=8,
+        return_intermediate_steps=True,
+        handle_parsing_errors=True,
+    )
 
 
 def run_investigation(supabase: Client, groq_api_key: str, industry: str, custom_goal: str = "") -> dict:
