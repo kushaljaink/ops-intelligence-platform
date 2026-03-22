@@ -512,42 +512,43 @@ export default function Home() {
             <h1 className="text-4xl font-extrabold tracking-tight">Ops Intelligence Platform</h1>
           </div>
           <p className="text-gray-400 text-base ml-5 mb-4">AI-powered workflow monitoring & bottleneck detection — <span className="text-indigo-400 font-medium">{selectedIndustry === 'custom' && customIndustry ? `${customIndustry.charAt(0).toUpperCase() + customIndustry.slice(1)} Operations` : industryLabel}</span></p>
-          <div className="flex flex-wrap items-center gap-2 ml-5">
-            {INDUSTRIES.filter(i => i.value !== 'custom').map(i => (
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex flex-wrap gap-2 ml-5">
+              {INDUSTRIES.filter(i => i.value !== 'custom').map(i => (
+                <button
+                  key={i.value}
+                  onClick={() => { setSelectedIndustry(i.value); setCustomResult(null); setCustomError(null); setFormRows([emptyRow()]) }}
+                  className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+                    selectedIndustry === i.value
+                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/30'
+                      : 'bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700 border border-gray-700'
+                  }`}
+                >
+                  {i.label}
+                </button>
+              ))}
               <button
-                key={i.value}
-                onClick={() => { setSelectedIndustry(i.value); setCustomResult(null); setCustomError(null); setFormRows([emptyRow()]) }}
+                onClick={() => { setSelectedIndustry('custom'); setCustomResult(null); setCustomError(null); setFormRows([emptyRow()]) }}
                 className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
-                  selectedIndustry === i.value
+                  selectedIndustry === 'custom'
                     ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/30'
                     : 'bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700 border border-gray-700'
                 }`}
               >
-                {i.label}
+                Custom…
               </button>
-            ))}
-            <button
-              onClick={() => { setSelectedIndustry('custom'); setCustomResult(null); setCustomError(null); setFormRows([emptyRow()]) }}
-              className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
-                selectedIndustry === 'custom'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/30'
-                  : 'bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700 border border-gray-700'
-              }`}
-            >
-              Custom…
-            </button>
-            {selectedIndustry === 'custom' && (
-              <input
-                value={customIndustry}
-                onChange={e => setCustomIndustry(e.target.value)}
-                placeholder="e.g. retail..."
-                className="bg-gray-800 border border-gray-600 rounded-full px-4 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 w-40"
-              />
-            )}
-            <div className="w-px h-6 bg-gray-700 mx-1" />
+              {selectedIndustry === 'custom' && (
+                <input
+                  value={customIndustry}
+                  onChange={e => setCustomIndustry(e.target.value)}
+                  placeholder="e.g. retail..."
+                  className="bg-gray-800 border border-gray-600 rounded-full px-4 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 w-40"
+                />
+              )}
+            </div>
             <button
               onClick={() => setShowAbout(true)}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-semibold text-indigo-400 hover:text-white bg-indigo-500/10 hover:bg-indigo-600 border border-indigo-500/40 hover:border-indigo-500 transition-colors"
+              className="flex items-center gap-2 px-5 py-2 rounded-full text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-400 shadow-lg shadow-indigo-500/40 transition-colors shrink-0"
             >
               <span>✦</span>
               <span>How It Works</span>
