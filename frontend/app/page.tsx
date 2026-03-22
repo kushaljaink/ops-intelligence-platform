@@ -114,6 +114,16 @@ const INDUSTRIES = [
   { value: 'custom',        label: 'Custom...' },
 ]
 
+const sortedIndustries = [...INDUSTRIES.filter(industry => industry.value !== 'custom')].sort((a, b) => {
+  const liveA = (INDUSTRY_DATA_MODES[a.value] ?? 'demo') === 'hybrid'
+  const liveB = (INDUSTRY_DATA_MODES[b.value] ?? 'demo') === 'hybrid'
+
+  if (liveA && !liveB) return -1
+  if (!liveA && liveB) return 1
+
+  return a.label.localeCompare(b.label)
+})
+
 const INDUSTRY_CONTEXT: Record<string, { scenario: string; what: string; example: WorkflowRow }> = {
   cruise: { scenario: 'A cruise terminal processing 3,000 passengers for embarkation', what: 'Each incident represents a boarding workflow stage where metrics have breached operational thresholds.', example: { stage: 'baggage_drop', queue_size: '65', processing_time_seconds: '420', throughput: '6' } },
   healthcare: {
@@ -813,7 +823,7 @@ export default function Home() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2 ml-5">
-              {INDUSTRIES.filter(i => i.value !== 'custom').map(i => (
+              {sortedIndustries.map(i => (
                 <button
                   key={i.value}
                   onClick={() => { setSelectedIndustry(i.value); setCustomResult(null); setCustomError(null); setFormRows([emptyRow()]) }}
