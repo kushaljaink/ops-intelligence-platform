@@ -548,11 +548,6 @@ class AgentDecisionRequest(BaseModel):
 
 @app.post("/agent/investigate")
 async def agent_investigate(body: AgentInvestigateRequest):
-    """
-    Trigger the AI agent to investigate the current operational state.
-    Returns investigation steps, findings, and decision points for the user.
-    The agent never acts autonomously — it surfaces decisions for human approval.
-    """
     try:
         from ops_agent import run_investigation
         result = run_investigation(
@@ -561,11 +556,16 @@ async def agent_investigate(body: AgentInvestigateRequest):
             industry=body.industry,
             custom_goal=body.goal or "",
         )
+        if not result.get("success"):
+            error_msg = result.get("error", "Unknown error")
+            if "GROQ_RATE_LIMIT" in str(error_msg):
+                raise HTTPException(status_code=429, detail=error_msg)
+            raise HTTPException(status_code=500, detail=error_msg)
         return result
-    except ImportError as e:
-        raise HTTPException(status_code=500, detail=f"Agent module not available: {str(e)}. Make sure langchain-groq is installed.")
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Agent investigation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/agent/decision")
