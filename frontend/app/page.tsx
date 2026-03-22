@@ -135,9 +135,9 @@ const INDUSTRY_CONTEXT: Record<string, { scenario: string; what: string; example
   ecommerce: { scenario: 'A fulfilment warehouse during a high-volume sales event', what: 'Each incident represents a fulfilment stage where pick rates or queue sizes have hit critical levels.', example: { stage: 'warehouse_picking', queue_size: '320', processing_time_seconds: '250', throughput: '30' } },
   airport: { scenario: 'An international airport terminal during morning peak hours', what: 'Each incident represents a passenger processing stage where throughput or wait times have exceeded safe thresholds.', example: { stage: 'security_screening', queue_size: '95', processing_time_seconds: '300', throughput: '14' } },
   construction: {
-    scenario: 'A construction site managing a multi-phase commercial build',
-    what: 'Each incident represents a site workflow stage where crew queues, task processing times, or daily output rates have breached operational thresholds.',
-    example: { stage: 'material_delivery', queue_size: '8', processing_time_seconds: '320', throughput: '1' },
+    scenario: 'A commercial construction project manager coordinating permits, field execution, inspections, and turnover',
+    what: 'Tracks approval, inspection, and field execution bottlenecks across a construction delivery workflow. Each incident reflects PM-facing risk around permits, subcontractor coordination, daily production, or handover readiness.',
+    example: { stage: 'inspection', queue_size: '6', processing_time_seconds: '28800', throughput: '1' },
   },
   civil: {
     scenario: 'A civil engineering project managing road and drainage infrastructure',
@@ -171,6 +171,17 @@ const WHATIF_CHANGES = [
   { value: 'upgrade_equipment', label: 'Upgrade Equipment' },
   { value: 'extend_hours', label: 'Extend Hours' },
 ]
+
+const CONSTRUCTION_STAGE_LABELS: Record<string, string> = {
+  permits_approvals: 'Permits & Approvals',
+  site_prep: 'Site Prep',
+  foundation: 'Foundation',
+  framing: 'Framing',
+  mep_rough_in: 'MEP Rough-In',
+  inspection: 'Inspection',
+  finishing: 'Finishing',
+  handover: 'Handover',
+}
 
 const CSV_TEMPLATE = `stage,queue_size,processing_time_seconds,throughput\nstage_one,12,45,120\nstage_two,67,380,8`
 const emptyRow = (): WorkflowRow => ({ stage: '', queue_size: '', processing_time_seconds: '', throughput: '' })
@@ -710,7 +721,12 @@ export default function Home() {
   }
 
   const severityColor = (s: string) => s === 'high' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : s === 'medium' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' : 'bg-green-500/20 text-green-400 border border-green-500/30'
-  const stageLabel = (s: string) => s.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+  const stageLabel = (s: string) => {
+    if (selectedIndustry === 'construction' && CONSTRUCTION_STAGE_LABELS[s]) {
+      return CONSTRUCTION_STAGE_LABELS[s]
+    }
+    return s.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+  }
   const healthColor = (status: string) => ({ healthy: 'text-green-400', warning: 'text-yellow-400', critical: 'text-orange-400', severe: 'text-red-400' }[status] ?? 'text-gray-400')
   const healthBarColor = (status: string) => ({ healthy: 'bg-green-500', warning: 'bg-yellow-500', critical: 'bg-orange-500', severe: 'bg-red-500' }[status] ?? 'bg-gray-500')
   const trendIcon = (t: string) => t === 'degrading' ? '↓' : t === 'improving' ? '↑' : '→'
@@ -1415,7 +1431,7 @@ export default function Home() {
                   <div className="space-y-1 text-xs text-gray-500">
                     <p><span className="text-gray-300">Healthcare:</span> Stage=triage · Queue=28 · Processing=180s · Throughput=8/hr</p>
                     <p><span className="text-gray-300">Banking:</span> Stage=loan_review · Queue=140 · Processing=720s · Throughput=3/hr</p>
-                    <p><span className="text-gray-300">Construction:</span> Stage=site_inspection · Queue=8 · Processing=320s · Throughput=1/hr</p>
+                    <p><span className="text-gray-300">Construction:</span> Stage=inspection · Queue=6 · Processing=28800s · Throughput=1/hr</p>
                   </div>
                 </div>
                 <p className="text-xs text-gray-600">💡 If you upload a file, the AI will automatically figure out which of your columns map to these fields — your columns don&apos;t need to be named exactly this way.</p>

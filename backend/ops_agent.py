@@ -15,7 +15,7 @@ INDUSTRY_THRESHOLDS = {
     "banking":       {"queue": 100, "processing": 600, "throughput": 5},
     "ecommerce":     {"queue": 200, "processing": 180, "throughput": 50},
     "airport":       {"queue": 80,  "processing": 600, "throughput": 8},
-    "construction":  {"queue": 5,   "processing": 240, "throughput": 3},
+    "construction":  {"queue": 4,   "processing": 14400, "throughput": 2},
     "civil":         {"queue": 8,   "processing": 480, "throughput": 2},
     "architecture":  {"queue": 10,  "processing": 720, "throughput": 1},
     "energy":        {"queue": 20,  "processing": 300, "throughput": 5},
@@ -24,6 +24,10 @@ INDUSTRY_THRESHOLDS = {
 }
 
 DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+
+INDUSTRY_AI_CONTEXT = {
+    "construction": "A project-management-oriented construction workflow involving permits, inspections, subcontractor coordination, and handoff risk.",
+}
 
 TOOLS = [
     {
@@ -68,7 +72,7 @@ TOOLS = [
                 "properties": {
                     "stage_name": {
                         "type": "string",
-                        "description": "The exact stage name e.g. security_check, material_delivery",
+                        "description": "The exact stage name e.g. security_check, permits_approvals",
                     }
                 },
                 "required": ["stage_name"],
@@ -223,6 +227,7 @@ def run_investigation(supabase: Client, groq_api_key: str, industry: str, custom
     goal = custom_goal or f"Investigate the {industry} operation. Check health scores, open incidents, cascade risks, ETAs, and patterns for any critical stages. Provide a prioritized action plan."
 
     system_prompt = f"""You are an AI operations intelligence agent for a {industry} operation.
+Industry context: {INDUSTRY_AI_CONTEXT.get(industry, f"A workflow-driven {industry} operation.")}
 Investigate systematically:
 1. Call check_health_scores first
 2. Call get_open_incidents
@@ -233,7 +238,8 @@ Investigate systematically:
    CRITICAL ISSUES: stages/incidents needing immediate action
    WARNING ISSUES: stages trending bad
    RECOMMENDED ACTIONS: numbered list, most urgent first
-Use actual stage names and numbers. Be specific."""
+Use actual stage names and numbers. Be specific.
+For construction, emphasize permit delays, inspection backlog, blocked downstream work, subcontractor coordination, and handover risk."""
 
     messages = [
         {"role": "system", "content": system_prompt},

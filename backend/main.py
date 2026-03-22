@@ -40,7 +40,7 @@ INDUSTRY_THRESHOLDS = {
     "banking":       {"queue": 100, "processing": 600, "throughput": 5},
     "ecommerce":     {"queue": 200, "processing": 180, "throughput": 50},
     "airport":       {"queue": 80,  "processing": 600,  "throughput": 8},
-    "construction":  {"queue": 5,   "processing": 240, "throughput": 3},
+    "construction":  {"queue": 4,   "processing": 14400, "throughput": 2},
     "civil":         {"queue": 8,   "processing": 480, "throughput": 2},
     "architecture":  {"queue": 10,  "processing": 720, "throughput": 1},
     "energy":        {"queue": 20,  "processing": 300, "throughput": 5},
@@ -66,6 +66,93 @@ ACTION_CATEGORIES = {
     "process": "process", "procedure": "process", "workflow": "process",
     "escalat": "escalation", "manag": "escalation", "supervis": "escalation",
 }
+
+INDUSTRY_AI_CONTEXT = {
+    "construction": "A project-management-oriented construction workflow involving permits, inspections, subcontractor coordination, and handoff risk.",
+}
+
+CONSTRUCTION_STAGE_LABELS = {
+    "permits_approvals": "Permits & Approvals",
+    "site_prep": "Site Prep",
+    "foundation": "Foundation",
+    "framing": "Framing",
+    "mep_rough_in": "MEP Rough-In",
+    "inspection": "Inspection",
+    "finishing": "Finishing",
+    "handover": "Handover",
+}
+
+CONSTRUCTION_STAGE_RECOMMENDATIONS = {
+    "permits_approvals": ["escalate permit review", "resequence non-blocked work", "confirm outstanding AHJ comments"],
+    "site_prep": ["clear prerequisite approvals", "rebalance field crews", "validate access and mobilization constraints"],
+    "foundation": ["verify concrete, rebar, and embed delivery dependencies", "shift labor to non-blocked prep", "lock inspection windows before pours"],
+    "framing": ["rebalance subcontractor allocation", "release alternative workfaces", "confirm material and lift access before crew start"],
+    "mep_rough_in": ["expedite MEP subcontractor recovery plan", "sequence other ready areas first", "validate long-lead material dependencies"],
+    "inspection": ["expedite inspection scheduling", "package complete inspection-ready areas", "isolate failed scope before rework spreads"],
+    "finishing": ["focus crews on turnover-critical spaces", "protect completed work from rework", "resequence punch-sensitive activities"],
+    "handover": ["burn down punch-list backlog", "close documentation gaps", "protect owner walkthrough dates"],
+}
+
+
+def get_industry_ai_context(industry: str) -> str:
+    return INDUSTRY_AI_CONTEXT.get(industry, f"A workflow-driven {industry} operation.")
+
+
+def format_stage_label(stage: str, industry: str = "") -> str:
+    if industry == "construction":
+        return CONSTRUCTION_STAGE_LABELS.get(stage, stage.replace("_", " ").title())
+    return stage.replace("_", " ").title()
+
+
+def get_stage_specific_actions(industry: str, stage: str) -> str:
+    if industry == "construction":
+        actions = CONSTRUCTION_STAGE_RECOMMENDATIONS.get(stage, [
+            "resequence non-blocked work",
+            "rebalance subcontractor allocation",
+            "validate predecessor dependencies",
+        ])
+        return ", ".join(actions)
+    return "reduce the active bottleneck, protect downstream throughput, and confirm the next handoff"
+
+
+def describe_metric_signal(industry: str, stage: str, queue_size: float, processing_time_seconds: float, throughput: float) -> str:
+    if industry != "construction":
+        return (
+            f"Queue {queue_size} exceeds threshold. "
+            f"Processing time {processing_time_seconds}s is elevated. "
+            f"Throughput is {throughput}/hr."
+        )
+
+    stage_label = format_stage_label(stage, industry)
+    if stage == "permits_approvals":
+        return (
+            f"{stage_label} backlog at {queue_size:.0f} submittals. Average approval cycle {processing_time_seconds / 3600:.1f} hours "
+            f"with throughput at {throughput:.1f}/hr, creating mobilization risk for downstream work."
+        )
+    if stage == "inspection":
+        return (
+            f"{stage_label} queue at {queue_size:.0f} inspection requests. Average scheduling/review cycle {processing_time_seconds / 3600:.1f} hours "
+            f"with only {throughput:.1f}/hr clearing, raising failed inspection rework and delay risk."
+        )
+    if stage == "framing":
+        return (
+            f"{stage_label} workfront has {queue_size:.0f} blocked tasks. Average cycle time is {processing_time_seconds / 3600:.1f} hours "
+            f"and output is {throughput:.1f}/hr, increasing framing crew idle risk."
+        )
+    if stage == "mep_rough_in":
+        return (
+            f"{stage_label} has {queue_size:.0f} constrained areas waiting on subcontractor progress. Average cycle time is {processing_time_seconds / 3600:.1f} hours "
+            f"with throughput at {throughput:.1f}/hr, putting inspections and finishes at risk."
+        )
+    if stage == "handover":
+        return (
+            f"{stage_label} is carrying {queue_size:.0f} open turnover items. Average closeout cycle is {processing_time_seconds / 3600:.1f} hours "
+            f"with throughput at {throughput:.1f}/hr, signaling punch-list backlog risk."
+        )
+    return (
+        f"{stage_label} is carrying {queue_size:.0f} blocked tasks. Average cycle time is {processing_time_seconds / 3600:.1f} hours "
+        f"with throughput at {throughput:.1f}/hr, increasing downstream schedule slippage risk."
+    )
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -321,14 +408,17 @@ async def analyze_incident(incident_id: str):
         )
 
     prompt = (
-        f"Senior ops analyst. Industry: {industry}.\n"
-        f"Stage: {incident.get('stage')} | Severity: {incident.get('severity')}\n"
+        f"Senior ops analyst.\n"
+        f"Industry: {industry}.\n"
+        f"Industry context: {get_industry_ai_context(industry)}\n"
+        f"Stage: {incident.get('stage')} ({format_stage_label(incident.get('stage', ''), industry)}) | Severity: {incident.get('severity')}\n"
         f"Description: {incident.get('description')}"
         f"{metrics_context}\n\n"
         f"Using the actual numbers above:\n"
         f"1. Specific root cause (reference the exact metric values)\n"
         f"2. Downstream cascade impact on other stages\n"
         f"3. Three concrete actions in the next 30 minutes\n"
+        f"Recommended action style for this stage: {get_stage_specific_actions(industry, incident.get('stage', ''))}\n"
         f"No generic advice. Use actual numbers."
     )
     analysis = await call_groq(prompt)
@@ -460,7 +550,16 @@ async def generate_playbook(stage: str, industry: str = "cruise"):
     improvements = [o for o in outcomes if o.get("health_after") and o.get("health_before") and o["health_after"] > o["health_before"]]
     best_actions = [o["action_taken"] for o in improvements[:3]] if improvements else []
     analyses_text = "\n".join(f"- ({a.get('confidence_score', '?')}% conf) {a['ai_analysis'][:200]}..." for a in top_analyses[:3]) if top_analyses else "No analyses yet."
-    prompt = (f"Write a Standard Operating Procedure for {industry} ops team.\nStage: {stage.replace('_', ' ').title()}\n{len(incidents)} incidents in 30 days ({resolution_rate}% resolved)\nBest fixes: {', '.join(best_actions) if best_actions else 'Not recorded yet'}\nTop analyses:\n{analyses_text}\n\nWrite with these exact sections:\n**TRIGGER CONDITIONS**\n**IMMEDIATE ACTIONS (0-5 min)**\n**ESCALATION (5-15 min)**\n**ROOT CAUSE CHECKLIST**\n**PREVENTION**\n2-3 bullets each. Specific to this stage and industry.")
+    prompt = (
+        f"Write a Standard Operating Procedure for the {industry} operations team.\n"
+        f"Industry context: {get_industry_ai_context(industry)}\n"
+        f"Stage: {format_stage_label(stage, industry)}\n"
+        f"{len(incidents)} incidents in 30 days ({resolution_rate}% resolved)\n"
+        f"Best fixes: {', '.join(best_actions) if best_actions else 'Not recorded yet'}\n"
+        f"Preferred action themes: {get_stage_specific_actions(industry, stage)}\n"
+        f"Top analyses:\n{analyses_text}\n\n"
+        "Write with these exact sections:\n**TRIGGER CONDITIONS**\n**IMMEDIATE ACTIONS (0-5 min)**\n**ESCALATION (5-15 min)**\n**ROOT CAUSE CHECKLIST**\n**PREVENTION**\n2-3 bullets each. Specific to this stage and industry."
+    )
     playbook_text = await call_groq(prompt, max_tokens=800)
     return {"stage": stage, "industry": industry, "playbook": playbook_text, "data_summary": {"total_incidents": len(incidents), "resolution_rate": resolution_rate, "actions_recorded": len(outcomes), "best_actions": best_actions, "generated_at": datetime.now(timezone.utc).isoformat()}}
 
@@ -705,7 +804,16 @@ async def whatif_simulation(industry: str = "cruise", stage: str = "", change: s
     projected_health = max(0, min(100, 100 - (projected_queue / thresholds["queue"] * 40) - (projected_proc / thresholds["processing"] * 40) + (min(projected_throughput, thresholds["throughput"]) / thresholds["throughput"] * 20)))
     health_improvement = projected_health - current_health
     would_resolve_breach = projected_queue <= thresholds["queue"] and projected_proc <= thresholds["processing"] and projected_throughput >= thresholds["throughput"]
-    prompt = f"Ops analyst simulating {change_descriptions.get(change)} in {industry}.\nStage: {stage}\nBefore: Queue {round(current_queue,1)} | Proc {round(current_proc,1)}s | Throughput {round(current_throughput,1)}/hr | Health {round(current_health,1)}\nAfter: Queue {round(projected_queue,1)} | Proc {round(projected_proc,1)}s | Throughput {round(projected_throughput,1)}/hr | Health {round(projected_health,1)}\nHealth improvement: +{round(health_improvement,1)} | Resolves breach: {'Yes' if would_resolve_breach else 'No'}\nIn 3-4 sentences: is this sufficient, what else may be needed, any risks?"
+    prompt = (
+        f"Ops analyst simulating {change_descriptions.get(change)} in {industry}.\n"
+        f"Industry context: {get_industry_ai_context(industry)}\n"
+        f"Stage: {stage} ({format_stage_label(stage, industry)})\n"
+        f"Before: Queue {round(current_queue,1)} | Proc {round(current_proc,1)}s | Throughput {round(current_throughput,1)}/hr | Health {round(current_health,1)}\n"
+        f"After: Queue {round(projected_queue,1)} | Proc {round(projected_proc,1)}s | Throughput {round(projected_throughput,1)}/hr | Health {round(projected_health,1)}\n"
+        f"Health improvement: +{round(health_improvement,1)} | Resolves breach: {'Yes' if would_resolve_breach else 'No'}\n"
+        f"Recommended action style for this stage: {get_stage_specific_actions(industry, stage)}\n"
+        "In 3-4 sentences: is this sufficient, what else may be needed, any risks?"
+    )
     ai_assessment = await call_groq(prompt)
     return {"stage": stage, "industry": industry, "change": change, "change_description": change_descriptions.get(change), "magnitude": magnitude, "current": {"queue": round(current_queue, 1), "processing_time": round(current_proc, 1), "throughput": round(current_throughput, 1), "health": round(current_health, 1)}, "projected": {"queue": round(projected_queue, 1), "processing_time": round(projected_proc, 1), "throughput": round(projected_throughput, 1), "health": round(projected_health, 1)}, "health_improvement": round(health_improvement, 1), "would_resolve_breach": would_resolve_breach, "ai_assessment": ai_assessment}
 
@@ -871,13 +979,15 @@ async def agent_investigate(body: AgentInvestigateRequest):
             return f"Tool error ({tool_name}): {str(e)}"
 
     system_prompt = f"""You are an AI operations intelligence agent for a {industry} operation.
+Industry context: {get_industry_ai_context(industry)}
 Investigate systematically:
 1. check_health_scores first
 2. get_open_incidents
 3. get_cascade_predictions
 4. get_eta_to_breach
 5. get_recurring_patterns for any critical/severe stage
-Then write: CRITICAL ISSUES / WARNING ISSUES / RECOMMENDED ACTIONS."""
+Then write: CRITICAL ISSUES / WARNING ISSUES / RECOMMENDED ACTIONS.
+For construction, emphasize permit delays, inspection backlog, blocked downstream work, subcontractor coordination, and handover risk."""
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -1004,7 +1114,14 @@ async def analyze_custom(body: AnalyzeCustomRequest):
         if row_issues: issues.append({"stage": r.stage, "issues": row_issues})
     rows_text = "\n".join(f"- {r.stage}: Queue {r.queue_size} | Processing {r.processing_time_seconds}s | Throughput {r.throughput}/hr" for r in rows)
     issues_text = "\n".join(f"- {i['stage']}: {', '.join(i['issues'])}" for i in issues) if issues else "No violations."
-    prompt = f"Senior ops analyst. {body.industry}.\nWorkflow:\n{rows_text}\nViolations:\n{issues_text}\n1. Worst bottleneck with numbers\n2. Cascade impact\n3. 3 actions in 30 min."
+    prompt = (
+        f"Senior ops analyst.\nIndustry: {body.industry}.\n"
+        f"Industry context: {get_industry_ai_context(body.industry)}\n"
+        f"Workflow:\n{rows_text}\n"
+        f"Violations:\n{issues_text}\n"
+        f"Preferred action themes: {get_stage_specific_actions(body.industry, rows[0].stage if rows else '')}\n"
+        "1. Worst bottleneck with numbers\n2. Cascade impact\n3. 3 actions in 30 min."
+    )
     ai_analysis = await call_groq(prompt)
     return {"detected_issues": issues, "ai_analysis": ai_analysis}
 
@@ -1053,6 +1170,7 @@ async def extract_and_analyze(
     thresholds = INDUSTRY_THRESHOLDS.get(industry, {"queue": 50, "processing": 300, "throughput": 10})
 
     extraction_prompt = f"""You are a data analyst. A user uploaded a file with operational workflow data for a {industry} operation.
+Industry context: {get_industry_ai_context(industry)}
 
 Raw file content (first 100 rows):
 {preview}
@@ -1114,10 +1232,12 @@ Extract up to 20 rows. Return ONLY the JSON object."""
     issues_text = "\n".join(f"- {i['stage']}: {', '.join(i['issues'])}" for i in issues) if issues else "No threshold violations detected."
 
     analysis_prompt = (
-        f"Senior ops analyst. A {industry} team uploaded their operational data.\n\n"
+        f"Senior ops analyst. A {industry} team uploaded their operational data.\n"
+        f"Industry context: {get_industry_ai_context(industry)}\n\n"
         f"Extracted data ({len(rows_data)} rows):\n{rows_text}\n\n"
         f"Violations:\n{issues_text}\n\n"
         f"Column interpretation: {notes}\n\n"
+        f"Preferred action themes: {get_stage_specific_actions(industry, str(rows_data[0].get('stage', '')) if rows_data else '')}\n\n"
         "1. Worst bottleneck with actual numbers\n2. Cascade impact\n3. 3 specific actions in next 30 min. No generic advice."
     )
     ai_analysis = await call_groq(analysis_prompt, max_tokens=600)
@@ -1289,7 +1409,7 @@ async def test_webhook(industry: str = "healthcare"):
     stages = {
         "healthcare": [("ed_triage", 25, 150, 8), ("bed_assignment", 18, 200, 5)],
         "cruise": [("baggage_drop", 60, 400, 7), ("security_check", 55, 320, 8)],
-        "construction": [("material_delivery", 7, 280, 2), ("site_inspection", 6, 260, 2)],
+        "construction": [("permits_approvals", 6, 86400, 1), ("inspection", 5, 28800, 1), ("mep_rough_in", 4, 21600, 1)],
         "banking": [("loan_verification", 120, 650, 4), ("kyc_check", 110, 700, 3)],
         "airport": [("checkin", 90, 250, 18), ("security_screening", 85, 260, 17)],
         "energy": [("generation_dispatch", 28, 360, 3), ("load_balancing", 22, 330, 4)],
@@ -1350,13 +1470,22 @@ async def receive_webhook(payload: WebhookPayload):
         industry = event.industry
         thresholds = INDUSTRY_THRESHOLDS.get(industry, {"queue": 50, "processing": 300, "throughput": 10})
         violations = []
-        if event.queue_size > thresholds["queue"]: violations.append(f"Queue {event.queue_size} exceeds {thresholds['queue']}")
-        if event.processing_time_seconds > thresholds["processing"]: violations.append(f"Processing {event.processing_time_seconds}s exceeds {thresholds['processing']}s")
-        if event.throughput < thresholds["throughput"]: violations.append(f"Throughput {event.throughput}/hr below {thresholds['throughput']}/hr")
+        if event.queue_size > thresholds["queue"]:
+            violations.append(f"Queue {event.queue_size} exceeds {thresholds['queue']}")
+        if event.processing_time_seconds > thresholds["processing"]:
+            violations.append(f"Processing {event.processing_time_seconds}s exceeds {thresholds['processing']}s")
+        if event.throughput < thresholds["throughput"]:
+            violations.append(f"Throughput {event.throughput}/hr below {thresholds['throughput']}/hr")
         health = max(0, min(100, 100 - (event.queue_size / thresholds["queue"] * 30) - (event.processing_time_seconds / thresholds["processing"] * 30) + (min(event.throughput, thresholds["throughput"]) / thresholds["throughput"] * 10)))
         supabase.table("workflow_metrics").insert({"industry": industry, "stage": event.stage, "queue_size": event.queue_size, "processing_time_seconds": event.processing_time_seconds, "throughput": event.throughput, "health_score": round(health, 1)}).execute()
         if violations:
             severity = "high" if len(violations) >= 2 else "medium"
+            if industry == "construction":
+                metric_summary = describe_metric_signal(industry, event.stage, event.queue_size, event.processing_time_seconds, event.throughput)
+                recommendations = get_stage_specific_actions(industry, event.stage)
+                violation_text = f"{metric_summary} Triggered metrics: {'; '.join(violations)}. Recommended next moves: {recommendations}."
+            else:
+                violation_text = ". ".join(violations)
             # Alert correlation — check for existing open incident in last 30 min
             cutoff = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
             existing = supabase.table("incidents").select("id, description").eq(
@@ -1369,7 +1498,7 @@ async def receive_webhook(payload: WebhookPayload):
                 # Update existing incident instead of creating duplicate
                 existing_id = existing.data[0]["id"]
                 supabase.table("incidents").update({
-                    "description": ". ".join(violations),
+                    "description": violation_text,
                     "severity": severity,
                 }).eq("id", existing_id).execute()
             else:
@@ -1377,7 +1506,7 @@ async def receive_webhook(payload: WebhookPayload):
                 inc = supabase.table("incidents").insert({
                     "stage": event.stage,
                     "severity": severity,
-                    "description": ". ".join(violations),
+                    "description": violation_text,
                     "status": "open",
                     "industry": industry,
                     "user_id": webhook_user_id,
@@ -1389,7 +1518,7 @@ async def receive_webhook(payload: WebhookPayload):
                         await send_slack_alert(
                             stage=event.stage,
                             severity=severity,
-                            description=". ".join(violations),
+                            description=violation_text,
                             industry=industry,
                             health=round(health, 1),
                         )
