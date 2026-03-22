@@ -13,6 +13,7 @@ import csv
 from supabase import create_client
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
+from services.live_data_service import fetch_live_incident_bundle, SUPPORTED_LIVE_INDUSTRIES
 
 load_dotenv()
 
@@ -44,6 +45,7 @@ INDUSTRY_THRESHOLDS = {
     "architecture":  {"queue": 10,  "processing": 720, "throughput": 1},
     "energy":        {"queue": 20,  "processing": 300, "throughput": 5},
     "water":         {"queue": 15,  "processing": 600, "throughput": 3},
+    "weather":       {"queue": 30,  "processing": 900, "throughput": 2},
     "traffic":       {"queue": 100, "processing": 120, "throughput": 30},
     "telecom":       {"queue": 200, "processing": 1800, "throughput": 10},
     "manufacturing": {"queue": 50,  "processing": 300, "throughput": 20},
@@ -107,6 +109,66 @@ def categorize_action(action_text: str) -> str:
         if keyword in text_lower:
             return category
     return "other"
+
+
+def is_elevated_severity(severity: str) -> bool:
+    return severity in {"high", "critical"}
+
+
+def upsert_live_incident_record(incident: dict) -> dict | None:
+    stage = incident.get("affected_system") or incident.get("title", "live_signal").lower().replace(" ", "_")
+    severity = incident.get("severity", "medium")
+    description = (
+        f"{incident.get('title')}. {incident.get('description')} "
+        f"Impact: {incident.get('user_impact')} "
+        f"Source: {incident.get('source_system')} ({incident.get('region')})."
+    ).strip()
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=4)).isoformat()
+    existing = supabase.table("incidents").select("id").eq("industry", incident.get("industry")).eq(
+        "stage", stage
+    ).eq("status", "open").gte("created_at", cutoff).limit(1).execute()
+
+    if existing.data:
+        supabase.table("incidents").update({
+            "description": description,
+            "severity": severity,
+        }).eq("id", existing.data[0]["id"]).execute()
+        refreshed = supabase.table("incidents").select("*").eq("id", existing.data[0]["id"]).single().execute()
+        return refreshed.data
+
+    created = supabase.table("incidents").insert({
+        "stage": stage,
+        "severity": severity,
+        "description": description,
+        "status": "open",
+        "industry": incident.get("industry"),
+        "user_id": None,
+    }).execute()
+    return created.data[0] if created.data else None
+
+
+def insert_live_metric_record(metric_event: dict):
+    industry = metric_event["industry"]
+    thresholds = INDUSTRY_THRESHOLDS.get(industry, {"queue": 50, "processing": 300, "throughput": 10})
+    health = max(
+        0,
+        min(
+            100,
+            100
+            - (metric_event["queue_size"] / thresholds["queue"] * 30)
+            - (metric_event["processing_time_seconds"] / thresholds["processing"] * 30)
+            + (min(metric_event["throughput"], thresholds["throughput"]) / thresholds["throughput"] * 10),
+        ),
+    )
+    supabase.table("workflow_metrics").insert({
+        "industry": industry,
+        "stage": metric_event["stage"],
+        "queue_size": metric_event["queue_size"],
+        "processing_time_seconds": metric_event["processing_time_seconds"],
+        "throughput": metric_event["throughput"],
+        "health_score": round(health, 1),
+    }).execute()
+    return round(health, 1)
 
 
 async def send_alert_email(incident: dict):
@@ -199,7 +261,7 @@ def get_stats(industry: str = "cruise"):
     now = datetime.now(timezone.utc)
     today_count = sum(1 for i in incidents if i.get("created_at") and (now - datetime.fromisoformat(i["created_at"].replace("Z", "+00:00"))).days < 1)
     yesterday_count = sum(1 for i in incidents if i.get("created_at") and 1 <= (now - datetime.fromisoformat(i["created_at"].replace("Z", "+00:00"))).days < 2)
-    return {"total": len(incidents), "high_severity": sum(1 for i in incidents if i.get("severity") == "high"), "open": sum(1 for i in incidents if i.get("status") == "open"), "today_count": today_count, "yesterday_count": yesterday_count, "trend": today_count - yesterday_count}
+    return {"total": len(incidents), "high_severity": sum(1 for i in incidents if is_elevated_severity(i.get("severity", ""))), "open": sum(1 for i in incidents if i.get("status") == "open"), "today_count": today_count, "yesterday_count": yesterday_count, "trend": today_count - yesterday_count}
 
 
 @app.patch("/incidents/{incident_id}/resolve")
@@ -272,7 +334,7 @@ async def analyze_incident(incident_id: str):
     analysis = await call_groq(prompt)
     confidence_score, confidence_reason = extract_confidence(analysis)
     supabase.table("analysis_logs").insert({"incident_id": incident_id, "ai_analysis": analysis, "triggered_by": "user", "confidence_score": confidence_score, "confidence_reason": confidence_reason}).execute()
-    if incident.get("severity") == "high":
+    if is_elevated_severity(incident.get("severity", "")):
         await send_alert_email(incident)
         latest_health = metrics_resp.data[0]["health_score"] if metrics_resp.data else None
         await send_slack_alert(
@@ -337,7 +399,7 @@ def get_resolution_effectiveness(industry: str = "cruise"):
                 stage_data[stage]["resolution_times"].append((resolved - created).total_seconds() / 60)
         else:
             stage_data[stage]["open"] += 1
-        if inc["severity"] == "high":
+        if is_elevated_severity(inc["severity"]):
             stage_data[stage]["high"] += 1
         outcome = outcome_map.get(inc["id"])
         if outcome:
@@ -1092,120 +1154,87 @@ def get_suggestions():
 
 @app.post("/fetch-live-data")
 async def fetch_live_data(industry: str = "all"):
-    """
-    Fetch real data from public APIs on demand.
-    Called when users load the dashboard - keeps data fresh without scheduling.
-    Sources: CMS (healthcare), OpenSky (airport), BTS (logistics/ecommerce)
-    """
-    import random as _random
-
+    bundle = await fetch_live_incident_bundle(industry)
     results = {}
-    industries_to_fetch = ["healthcare", "airport", "ecommerce"] if industry == "all" else [industry]
+    all_incidents = []
+    mode_counts = {"live": 0, "fallback": 0}
 
-    for ind in industries_to_fetch:
-        events = []
-        hour = datetime.now(timezone.utc).hour
-        weekday = datetime.now(timezone.utc).weekday()
-        noise = lambda: _random.uniform(0.88, 1.12)
+    for ind, result in bundle["industries"].items():
+        incidents = result["incidents"]
+        metric_events = result["metric_events"]
+        inserted_incidents = 0
+        inserted_metrics = 0
+        fetched_at = datetime.now(timezone.utc).isoformat()
 
-        if ind == "healthcare":
-            is_peak = 9 <= hour <= 14 or 18 <= hour <= 22
-            is_monday = weekday == 0
-            base = (1.4 if is_peak else 0.8) * (1.2 if is_monday else 1.0)
-            try:
-                async with httpx.AsyncClient(timeout=12.0) as client:
-                    resp = await client.get(
-                        "https://data.cms.gov/provider-data/api/1/datastore/query/yv7e-xc69/0",
-                        params={"limit": 50, "filters[0][property]": "measure_id", "filters[0][value]": "OP_18b", "filters[0][operator]": "="},
+        for metric_event in metric_events:
+            insert_live_metric_record(metric_event)
+            inserted_metrics += 1
+
+        for live_incident in incidents:
+            stored = upsert_live_incident_record(live_incident)
+            if stored:
+                inserted_incidents += 1
+                if is_elevated_severity(live_incident.get("severity", "")):
+                    await send_alert_email(stored)
+                    await send_slack_alert(
+                        stage=stored.get("stage", live_incident.get("affected_system", "")),
+                        severity="high" if live_incident.get("severity") == "critical" else live_incident.get("severity", "high"),
+                        description=stored.get("description", live_incident.get("description", "")),
+                        industry=ind,
                     )
-                records = resp.json().get("results", [])
-                valid = [r for r in records if r.get("score") not in (None, "Not Available", "")]
-                if valid:
-                    sample = _random.sample(valid, min(2, len(valid)))
-                    for rec in sample:
-                        ed_min = float(rec["score"])
-                        ed_sec = ed_min * 60
-                        q = max(5, min(45, ed_min / 7))
-                        t = max(3, min(20, 60 / (ed_min / 60 + 0.1)))
-                        state = rec.get("state", "US")
-                        events += [
-                            {"stage": "ed_triage",      "queue_size": round(q, 1),       "processing_time_seconds": round(ed_sec*0.15, 1), "throughput": round(t, 1),       "industry": "healthcare", "source": f"CMS:{state}"},
-                            {"stage": "bed_assignment", "queue_size": round(q*0.7, 1),   "processing_time_seconds": round(ed_sec*0.25, 1), "throughput": round(t*0.8, 1),   "industry": "healthcare", "source": f"CMS:{state}"},
-                            {"stage": "discharge",      "queue_size": round(q*0.5, 1),   "processing_time_seconds": round(ed_sec*0.30, 1), "throughput": round(t*1.1, 1),   "industry": "healthcare", "source": f"CMS:{state}"},
-                        ]
-            except Exception:
-                pass
-            if not events:
-                events = [
-                    {"stage": "ed_triage",      "queue_size": round(18*base*noise(), 1), "processing_time_seconds": round(145*base*noise(), 1), "throughput": round(12/base*noise(), 1), "industry": "healthcare", "source": "acep_benchmark"},
-                    {"stage": "bed_assignment", "queue_size": round(12*base*noise(), 1), "processing_time_seconds": round(210*base*noise(), 1), "throughput": round(8/base*noise(), 1),  "industry": "healthcare", "source": "acep_benchmark"},
-                    {"stage": "diagnostics",    "queue_size": round(8*base*noise(), 1),  "processing_time_seconds": round(180*base*noise(), 1), "throughput": round(10/base*noise(), 1), "industry": "healthcare", "source": "acep_benchmark"},
-                    {"stage": "discharge",      "queue_size": round(10*base*noise(), 1), "processing_time_seconds": round(240*base*noise(), 1), "throughput": round(7/base*noise(), 1),  "industry": "healthcare", "source": "acep_benchmark"},
-                ]
 
-        elif ind == "airport":
-            is_peak = 6 <= hour <= 10 or 16 <= hour <= 20
-            airports = [{"code": "LAX", "lat": 33.9425, "lon": -118.4081}, {"code": "JFK", "lat": 40.6413, "lon": -73.7781}]
-            for airport in airports[:1]:
-                try:
-                    async with httpx.AsyncClient(timeout=10.0) as client:
-                        size = 0.5
-                        resp = await client.get(
-                            "https://opensky-network.org/api/states/all",
-                            params={"lamin": airport["lat"]-size, "lomin": airport["lon"]-size, "lamax": airport["lat"]+size, "lomax": airport["lon"]+size},
-                        )
-                    count = len(resp.json().get("states", []) or [])
-                    q = max(15, min(120, count * 5))
-                    p = max(100, count * 12)
-                    t = max(5, min(35, 180 / max(1, count)))
-                    events += [
-                        {"stage": "check_in",           "queue_size": round(q*0.9, 1), "processing_time_seconds": round(p*0.6, 1), "throughput": round(t*1.2, 1), "industry": "airport", "source": f"OpenSky:{airport['code']}"},
-                        {"stage": "security_screening", "queue_size": round(q*1.1, 1), "processing_time_seconds": round(p*0.8, 1), "throughput": round(t*0.9, 1), "industry": "airport", "source": f"OpenSky:{airport['code']}"},
-                        {"stage": "boarding",           "queue_size": round(q*0.7, 1), "processing_time_seconds": round(p*0.5, 1), "throughput": round(t*1.1, 1), "industry": "airport", "source": f"OpenSky:{airport['code']}"},
-                    ]
-                except Exception:
-                    base = 1.5 if is_peak else 0.7
-                    events += [
-                        {"stage": "check_in",           "queue_size": round(65*base*noise(), 1), "processing_time_seconds": round(180*base*noise(), 1), "throughput": round(18/base*noise(), 1), "industry": "airport", "source": "faa_benchmark"},
-                        {"stage": "security_screening", "queue_size": round(80*base*noise(), 1), "processing_time_seconds": round(220*base*noise(), 1), "throughput": round(15/base*noise(), 1), "industry": "airport", "source": "faa_benchmark"},
-                        {"stage": "boarding",           "queue_size": round(50*base*noise(), 1), "processing_time_seconds": round(150*base*noise(), 1), "throughput": round(20/base*noise(), 1), "industry": "airport", "source": "faa_benchmark"},
-                    ]
+        mode_counts[result["data_mode"]] = mode_counts.get(result["data_mode"], 0) + 1
+        all_incidents.extend(incidents)
+        results[ind] = {
+            "supported": result["supported"],
+            "data_mode": result["data_mode"],
+            "incident_count": len(incidents),
+            "metric_count": inserted_metrics,
+            "stored_incident_count": inserted_incidents,
+            "source_systems": result.get("source_systems", []),
+            "source_system": result.get("source_systems", [None])[0],
+            "error": result.get("error"),
+            "fetched_at": fetched_at,
+            "incidents": incidents,
+        }
 
-        elif ind == "ecommerce":
-            is_holiday = datetime.now(timezone.utc).month in [11, 12]
-            is_monday = weekday == 0
-            base = 1.6 if is_holiday else 1.0
-            try:
-                async with httpx.AsyncClient(timeout=12.0) as client:
-                    resp = await client.get("https://data.bts.gov/resource/crem-vd5q.json", params={"$limit": 5, "$order": "date DESC"})
-                bts = resp.json()
-                if bts:
-                    vw = float(bts[0].get("vessels_waiting_at_berth", 8))
-                    cv = float(bts[0].get("loaded_imports", 500000))
-                    cong = vw / 10.0
-                    events = [
-                        {"stage": "port_receiving",      "queue_size": round(min(250,cv/2000)*cong, 1), "processing_time_seconds": round(min(220,vw*15), 1),  "throughput": round(max(30,600/max(1,vw)), 1), "industry": "ecommerce", "source": "BTS:port"},
-                        {"stage": "warehouse_processing","queue_size": round(min(200,cv/2500)*cong, 1), "processing_time_seconds": round(min(180,vw*12), 1),  "throughput": round(max(35,550/max(1,vw)), 1), "industry": "ecommerce", "source": "BTS:freight"},
-                        {"stage": "dispatch",            "queue_size": round(min(180,cv/3000), 1),       "processing_time_seconds": round(min(160,vw*10), 1),  "throughput": round(max(40,600/max(1,vw)), 1), "industry": "ecommerce", "source": "BTS:freight"},
-                        {"stage": "returns",             "queue_size": round(90*(1.8 if is_monday else 1)*noise(), 1), "processing_time_seconds": round(175*noise(), 1), "throughput": round(35/(1.8 if is_monday else 1)*noise(), 1), "industry": "ecommerce", "source": "BTS:returns"},
-                    ]
-            except Exception:
-                pass
-            if not events:
-                events = [
-                    {"stage": "warehouse_receiving", "queue_size": round(180*base*noise(), 1), "processing_time_seconds": round(165*base*noise(), 1), "throughput": round(52/base*noise(), 1), "industry": "ecommerce", "source": "industry_benchmark"},
-                    {"stage": "order_processing",    "queue_size": round(220*base*noise(), 1), "processing_time_seconds": round(145*base*noise(), 1), "throughput": round(48/base*noise(), 1), "industry": "ecommerce", "source": "industry_benchmark"},
-                    {"stage": "dispatch",            "queue_size": round(160*base*noise(), 1), "processing_time_seconds": round(130*base*noise(), 1), "throughput": round(58/base*noise(), 1), "industry": "ecommerce", "source": "industry_benchmark"},
-                    {"stage": "returns",             "queue_size": round(95*(1.8 if is_monday else 1)*noise(), 1), "processing_time_seconds": round(175*noise(), 1), "throughput": round(35/(1.8 if is_monday else 1)*noise(), 1), "industry": "ecommerce", "source": "industry_benchmark"},
-                ]
+    if industry == "all":
+        overall_mode = "mixed" if len({r["data_mode"] for r in results.values()}) > 1 else next(iter(results.values()))["data_mode"] if results else "fallback"
+        return {
+            "success": True,
+            "industry": "all",
+            "data_mode": overall_mode,
+            "incident_count": len(all_incidents),
+            "incidents": all_incidents,
+            "summary": {
+                "supported_live_industries": list(SUPPORTED_LIVE_INDUSTRIES),
+                "mode_counts": mode_counts,
+                "industries": results,
+            },
+        }
 
-        # Post events through internal webhook handler
-        if events:
-            payload = WebhookPayload(events=[WebhookEvent(**e) for e in events])
-            result = await receive_webhook(payload)
-            results[ind] = result
-
-    return {"success": True, "fetched": list(results.keys()), "results": results}
+    selected = results.get(industry, {
+        "data_mode": "fallback",
+        "incident_count": 0,
+        "metric_count": 0,
+        "stored_incident_count": 0,
+        "source_systems": [],
+        "source_system": None,
+        "error": f"Industry '{industry}' is not supported for live data.",
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "incidents": [],
+    })
+    return {
+        "success": True,
+        "industry": industry,
+        "data_mode": selected["data_mode"],
+        "incident_count": selected["incident_count"],
+        "incidents": selected["incidents"],
+        "summary": {
+            "supported_live_industries": list(SUPPORTED_LIVE_INDUSTRIES),
+            "industry_result": selected,
+        },
+    }
 
 
 @app.get("/connect-info")
@@ -1263,6 +1292,9 @@ async def test_webhook(industry: str = "healthcare"):
         "construction": [("material_delivery", 7, 280, 2), ("site_inspection", 6, 260, 2)],
         "banking": [("loan_verification", 120, 650, 4), ("kyc_check", 110, 700, 3)],
         "airport": [("checkin", 90, 250, 18), ("security_screening", 85, 260, 17)],
+        "energy": [("generation_dispatch", 28, 360, 3), ("load_balancing", 22, 330, 4)],
+        "water": [("treatment_filtration", 18, 720, 2), ("distribution_pumping", 16, 680, 2)],
+        "weather": [("storm_response", 35, 1200, 1), ("flood_response", 28, 1500, 1)],
         "civil": [("earthworks", 10, 500, 1), ("quality_check", 9, 490, 1)],
         "architecture": [("design_review", 12, 750, 0), ("permit_submission", 11, 760, 0)],
         "ecommerce": [("warehouse_pick", 220, 190, 48), ("dispatch", 210, 185, 47)],

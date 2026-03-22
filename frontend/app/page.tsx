@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import type { Session } from '@supabase/supabase-js'
 
@@ -69,7 +69,25 @@ type AgentResult = {
   error?: string
 } | null
 
+type LiveFetchState = {
+  status: 'idle' | 'loading' | 'live' | 'fallback' | 'demo'
+  message: string
+  modeLabel?: 'Live Data' | 'Fallback Demo' | 'Demo Data'
+  supportLabel?: 'Hybrid' | 'Demo'
+  sourceSystem?: string | null
+  sourceSystems?: string[]
+  fetchedAt?: string
+}
+
 const BACKEND = 'https://ops-intelligence-platform.onrender.com'
+const LIVE_DATA_INDUSTRIES = ['healthcare', 'airport', 'energy', 'water', 'weather'] as const
+const INDUSTRY_DATA_MODES: Record<string, 'hybrid' | 'demo'> = {
+  healthcare: 'hybrid',
+  airport: 'hybrid',
+  energy: 'hybrid',
+  water: 'hybrid',
+  weather: 'hybrid',
+}
 
 const INDUSTRIES = [
   { value: 'cruise',        label: 'Cruise Terminal' },
@@ -82,6 +100,7 @@ const INDUSTRIES = [
   { value: 'architecture',  label: 'Architecture & Design' },
   { value: 'energy',        label: 'Energy & Grid' },
   { value: 'water',         label: 'Water & Utilities' },
+  { value: 'weather',       label: 'Weather Operations' },
   { value: 'traffic',       label: 'Road & Traffic' },
   { value: 'telecom',       label: 'Telecommunications' },
   { value: 'manufacturing', label: 'Manufacturing' },
@@ -122,6 +141,7 @@ const INDUSTRY_CONTEXT: Record<string, { scenario: string; what: string; example
   },
   energy: { scenario: 'A regional grid operator managing generation dispatch and load balancing', what: 'Each incident represents a grid operation stage where generation capacity, transmission routing, or load balancing has exceeded safe thresholds.', example: { stage: 'generation_dispatch', queue_size: '25', processing_time_seconds: '360', throughput: '3' } },
   water: { scenario: 'A municipal water utility managing treatment and distribution operations', what: 'Each incident represents a treatment or distribution stage where intake queues, filtration throughput, or pump capacity has breached safe operating limits.', example: { stage: 'treatment_filtration', queue_size: '18', processing_time_seconds: '720', throughput: '2' } },
+  weather: { scenario: 'A regional operations center monitoring severe weather disruptions', what: 'Each incident represents an active NOAA/NWS weather signal that may disrupt staffing, logistics, or field operations.', example: { stage: 'storm_response', queue_size: '35', processing_time_seconds: '1200', throughput: '1' } },
   traffic: { scenario: 'A city traffic management center monitoring highway and intersection flow', what: 'Each incident represents a traffic control stage where vehicle queues, merge throughput, or signal coordination has exceeded safe capacity.', example: { stage: 'highway_merging', queue_size: '120', processing_time_seconds: '150', throughput: '18' } },
   telecom: { scenario: 'A telecommunications provider managing call routing and network provisioning', what: 'Each incident represents a network operations stage where call queues, provisioning backlogs, or fault resolution times have breached SLA thresholds.', example: { stage: 'call_routing', queue_size: '350', processing_time_seconds: '2400', throughput: '6' } },
   manufacturing: { scenario: 'A production facility managing assembly line operations and quality control', what: 'Each incident represents a manufacturing stage where material intake, assembly throughput, or QC rejection rates have exceeded operational thresholds.', example: { stage: 'assembly_line', queue_size: '60', processing_time_seconds: '420', throughput: '12' } },
@@ -172,7 +192,6 @@ export default function Home() {
   const [connectSnippet, setConnectSnippet] = useState<'curl' | 'python' | 'javascript'>('curl')
   const [testLoading, setTestLoading] = useState(false)
   const [testResult, setTestResult] = useState<string | null>(null)
-  const [showSuggest, setShowSuggest] = useState(false)
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [suggestTitle, setSuggestTitle] = useState('')
   const [suggestCategory, setSuggestCategory] = useState('feature')
@@ -196,6 +215,7 @@ export default function Home() {
   const [effectiveness, setEffectiveness] = useState<ResolutionEffectiveness[]>([])
   const [intelLoading, setIntelLoading] = useState(false)
   const [activeIntelTab, setActiveIntelTab] = useState<'health' | 'patterns' | 'cascade' | 'anomaly' | 'eta' | 'forecast' | 'whatif' | 'effectiveness' | 'playbook'>('health')
+  const [liveFetchState, setLiveFetchState] = useState<LiveFetchState>({ status: 'demo', message: 'Demo data active' })
 
   // What-if
   const [whatIfStage, setWhatIfStage] = useState('')
@@ -217,9 +237,9 @@ export default function Home() {
   const industryValue = selectedIndustry === 'custom' ? customIndustry || 'operations' : selectedIndustry
   const industryLabel = INDUSTRIES.find(i => i.value === selectedIndustry)?.label ?? customIndustry
   const context = INDUSTRY_CONTEXT[selectedIndustry] ?? INDUSTRY_CONTEXT['custom']
+  const industryDataMode = INDUSTRY_DATA_MODES[selectedIndustry] ?? 'demo'
 
   // Custom analysis
-  const [inputMode, setInputMode] = useState<'form' | 'csv'>('form')
   const [formRows, setFormRows] = useState<WorkflowRow[]>([emptyRow()])
   const [csvText, setCsvText] = useState('')
   const [customLoading, setCustomLoading] = useState(false)
@@ -269,15 +289,22 @@ export default function Home() {
     finally { setIntelLoading(false) }
   }
 
-  const fetchData = (industry: string) => {
+  const fetchData = useCallback(async (industry: string) => {
+    const authHeaders = session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}
     setLoading(true); setError(null); setIncidents([]); setAnalyses({}); setStats(null)
-    Promise.all([
-      fetch(`${BACKEND}/incidents?industry=${industry}`, { headers: getAuthHeaders() }).then(r => r.json()),
-      fetch(`${BACKEND}/incidents/stats?industry=${industry}`, { headers: getAuthHeaders() }).then(r => r.json()),
-    ])
-      .then(([incData, statsData]) => { setIncidents(incData.incidents ?? []); setStats(statsData); setLoading(false) })
-      .catch(err => { setError(err.message); setLoading(false) })
-  }
+    try {
+      const [incData, statsData] = await Promise.all([
+        fetch(`${BACKEND}/incidents?industry=${industry}`, { headers: authHeaders }).then(r => r.json()),
+        fetch(`${BACKEND}/incidents/stats?industry=${industry}`, { headers: authHeaders }).then(r => r.json()),
+      ])
+      setIncidents(incData.incidents ?? [])
+      setStats(statsData)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to load incidents')
+    } finally {
+      setLoading(false)
+    }
+  }, [session?.access_token])
 
   useEffect(() => {
     // Auth listener
@@ -290,21 +317,81 @@ export default function Home() {
       if (session?.access_token) fetchUserApiKey(session.access_token)
     })
     return () => subscription.unsubscribe()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
-    fetchData(industryValue)
-    fetchIntelligence(industryValue)
+    let cancelled = false
+
+    const loadIndustryData = async () => {
+      setLiveFetchState({
+        status: industryDataMode === 'hybrid' ? 'loading' : 'demo',
+        message: industryDataMode === 'hybrid' ? 'Refreshing free live sources...' : 'Demo data active',
+        supportLabel: industryDataMode === 'hybrid' ? 'Hybrid' : 'Demo',
+        modeLabel: industryDataMode === 'hybrid' ? undefined : 'Demo Data',
+      })
+
+      await Promise.all([
+        fetchData(industryValue),
+        fetchIntelligence(industryValue),
+      ])
+
+      if (cancelled || !LIVE_DATA_INDUSTRIES.includes(industryValue as typeof LIVE_DATA_INDUSTRIES[number])) {
+        if (!cancelled && industryDataMode !== 'hybrid') {
+          setLiveFetchState({ status: 'demo', message: 'Demo data active', supportLabel: 'Demo', modeLabel: 'Demo Data' })
+        }
+        return
+      }
+
+      try {
+        const response = await fetch(`${BACKEND}/fetch-live-data?industry=${industryValue}`, { method: 'POST' })
+        const payload = await response.json()
+        if (!response.ok || cancelled) {
+          setLiveFetchState({
+            status: 'fallback',
+            message: 'Live source unavailable. Showing fallback demo scenario.',
+            supportLabel: 'Hybrid',
+            modeLabel: 'Fallback Demo',
+          })
+          return
+        }
+
+        const result = payload?.summary?.industry_result
+        const mode = payload?.data_mode === 'live' ? 'live' : 'fallback'
+        setLiveFetchState({
+          status: mode,
+          message: mode === 'live' ? 'Live data refreshed from official public sources.' : 'Live source unavailable. Showing fallback demo scenario.',
+          modeLabel: mode === 'live' ? 'Live Data' : 'Fallback Demo',
+          supportLabel: 'Hybrid',
+          sourceSystem: result?.source_system ?? null,
+          sourceSystems: result?.source_systems ?? [],
+          fetchedAt: result?.fetched_at,
+        })
+
+        await Promise.all([
+          fetchData(industryValue),
+          fetchIntelligence(industryValue),
+        ])
+      } catch {
+        if (!cancelled) {
+          setLiveFetchState({
+            status: 'fallback',
+            message: 'Live source unavailable. Showing fallback demo scenario.',
+            supportLabel: 'Hybrid',
+            modeLabel: 'Fallback Demo',
+          })
+        }
+      }
+    }
+
+    loadIndustryData()
     setWhatIfStage(''); setWhatIfResult(null); setPlaybook(null); setPlaybookStage('')
     fetchSuggestions()
     fetchConnectInfo()
-    // Trigger live data fetch for healthcare, airport, logistics
-    if (['healthcare', 'airport', 'ecommerce'].includes(industryValue)) {
-      fetch(`${BACKEND}/fetch-live-data?industry=${industryValue}`, { method: 'POST' })
-        .catch(() => {})  // Silent - never block the UI
+
+    return () => {
+      cancelled = true
     }
-  }, [industryValue])
+  }, [fetchData, industryDataMode, industryValue])
 
   const analyzeIncident = async (id: string) => {
     setAnalyses(prev => ({ ...prev, [id]: { loading: true, result: null, error: null, rateLimit: false } }))
@@ -444,6 +531,8 @@ export default function Home() {
   }
 
   const toolLabel = (tool: string) => tool.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+  void toolIcon
+  void toolLabel
 
   const updateRow = (index: number, field: keyof WorkflowRow, value: string) =>
     setFormRows(prev => prev.map((r, i) => i === index ? { ...r, [field]: value } : r))
@@ -451,7 +540,7 @@ export default function Home() {
   const removeRow = (index: number) => setFormRows(prev => prev.filter((_, i) => i !== index))
 
   const parseRows = (): WorkflowRow[] | null => {
-    if (inputMode === 'form') return formRows
+    if (activeInputTab === 'form') return formRows
     const lines = csvText.trim().split('\n').filter(Boolean)
     if (lines.length < 2) return null
     return lines.slice(1).map(line => {
@@ -476,7 +565,7 @@ export default function Home() {
       setSuggestDescription('')
       setSuggestCategory('feature')
       fetchSuggestions()
-    } catch (e) {
+    } catch {
       setSuggestError('Failed to submit. Please try again.')
     } finally {
       setSuggestSubmitting(false)
@@ -489,11 +578,6 @@ export default function Home() {
       const d = await r.json()
       setSuggestions(d.suggestions ?? [])
     } catch { /* ignore */ }
-  }
-
-  const getAuthHeaders = (): Record<string, string> => {
-    if (!session?.access_token) return {}
-    return { Authorization: `Bearer ${session.access_token}` }
   }
 
   const handleAuth = async () => {
@@ -647,7 +731,39 @@ export default function Home() {
             <h1 className="text-4xl font-extrabold tracking-tight">Ops Intelligence Platform</h1>
           </div>
           <div className="flex items-center justify-between mb-4">
-            <p className="text-gray-400 text-base ml-5">AI-powered workflow monitoring & bottleneck detection — <span className="text-indigo-400 font-medium">{selectedIndustry === 'custom' && customIndustry ? `${customIndustry.charAt(0).toUpperCase() + customIndustry.slice(1)} Operations` : industryLabel}</span></p>
+            <div className="ml-5">
+              <p className="text-gray-400 text-base">AI-powered workflow monitoring & bottleneck detection — <span className="text-indigo-400 font-medium">{selectedIndustry === 'custom' && customIndustry ? `${customIndustry.charAt(0).toUpperCase() + customIndustry.slice(1)} Operations` : industryLabel}</span></p>
+              <div className="flex items-center gap-2 mt-2">
+                <span className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
+                  industryDataMode === 'hybrid'
+                    ? 'bg-indigo-500/10 text-indigo-300 border-indigo-500/40'
+                    : 'bg-gray-800 text-gray-300 border-gray-700'
+                }`}>
+                  {industryDataMode === 'hybrid' ? 'Hybrid' : 'Demo'}
+                </span>
+                <span className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
+                  liveFetchState.status === 'live'
+                    ? 'bg-green-500/10 text-green-300 border-green-500/40'
+                    : liveFetchState.status === 'loading'
+                      ? 'bg-sky-500/10 text-sky-300 border-sky-500/40'
+                      : liveFetchState.status === 'fallback'
+                        ? 'bg-amber-500/10 text-amber-300 border-amber-500/40'
+                        : 'bg-gray-800 text-gray-300 border-gray-700'
+                }`}>
+                  {liveFetchState.status === 'live' && 'Live Data'}
+                  {liveFetchState.status === 'loading' && 'Refreshing Live Data'}
+                  {liveFetchState.status === 'fallback' && 'Fallback Demo Data'}
+                  {liveFetchState.status === 'demo' && (industryDataMode === 'hybrid' ? 'Hybrid' : 'Demo Data')}
+                </span>
+                <span className="text-xs text-gray-500">{liveFetchState.message}</span>
+              </div>
+              {(liveFetchState.sourceSystem || liveFetchState.fetchedAt) && (
+                <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-gray-500">
+                  {liveFetchState.sourceSystem && <span>Source: {liveFetchState.sourceSystem}</span>}
+                  {liveFetchState.fetchedAt && <span>Fetched: {new Date(liveFetchState.fetchedAt).toLocaleString()}</span>}
+                </div>
+              )}
+            </div>
             <div className="flex items-center gap-2 shrink-0">
               {session ? (
                 <div className="flex items-center gap-2">
@@ -698,7 +814,14 @@ export default function Home() {
                       : 'bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700 border border-gray-700'
                   }`}
                 >
-                  {i.label}
+                  <span>{i.label}</span>
+                  <span className={`ml-2 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                    (INDUSTRY_DATA_MODES[i.value] ?? 'demo') === 'hybrid'
+                      ? 'bg-emerald-500/15 text-emerald-300'
+                      : 'bg-gray-700 text-gray-300'
+                  }`}>
+                    {(INDUSTRY_DATA_MODES[i.value] ?? 'demo') === 'hybrid' ? 'Live' : 'Demo'}
+                  </span>
                 </button>
               ))}
               <button
@@ -776,29 +899,17 @@ export default function Home() {
                 className={`px-3 py-3 text-xs font-medium border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 ${
                   activeIntelTab === tab.key
                     ? 'border-indigo-500 text-white'
-                    : 'highlight' in tab && (tab as any).highlight
-                    ? 'border-transparent'
                     : 'border-transparent text-gray-500 hover:text-gray-300'
                 }`}
               >
-                {'highlight' in tab && (tab as any).highlight ? (
-                  <span className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                    activeIntelTab === tab.key
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-indigo-600 text-white hover:bg-indigo-500'
-                  }`}>
-                    {tab.label}
-                  </span>
-                ) : (
-                  <>
-                    {tab.label}
-                    {'badge' in tab && tab.badge > 0 && (
-                      <span className={`text-xs px-1.5 py-0.5 rounded-full text-white ${'badgeColor' in tab ? tab.badgeColor : 'bg-gray-500'}`}>
-                        {tab.badge}
-                      </span>
-                    )}
-                  </>
-                )}
+                <>
+                  {tab.label}
+                  {'badge' in tab && tab.badge > 0 && (
+                    <span className={`text-xs px-1.5 py-0.5 rounded-full text-white ${'badgeColor' in tab ? tab.badgeColor : 'bg-gray-500'}`}>
+                      {tab.badge}
+                    </span>
+                  )}
+                </>
               </button>
             ))}
           </div>
@@ -1121,14 +1232,19 @@ export default function Home() {
         {/* Two-column layout */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
 
-          {/* LEFT — Demo Incidents */}
+          {/* LEFT — Incidents */}
           <div>
-            <h2 className="text-lg font-semibold mb-3">Live Demo — Active Incidents</h2>
+            <h2 className="text-lg font-semibold mb-3">Active Incidents</h2>
             <div className="bg-gray-800/60 border border-gray-700 rounded-lg px-4 py-3 mb-4">
-              <p className="text-xs text-indigo-400 font-semibold uppercase tracking-wider mb-1">Demo Scenario</p>
+              <p className="text-xs text-indigo-400 font-semibold uppercase tracking-wider mb-1">{industryDataMode === 'hybrid' ? 'Industry Scenario' : 'Demo Scenario'}</p>
               <p className="text-sm text-gray-300 mb-1">{context.scenario}</p>
               <p className="text-xs text-gray-500">{context.what}</p>
             </div>
+            {liveFetchState.status === 'fallback' && (
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg px-4 py-3 mb-4">
+                <p className="text-sm text-amber-200">Live source unavailable. Showing fallback demo scenario.</p>
+              </div>
+            )}
 
             {loading ? <p className="text-gray-400">Loading incidents...</p>
               : error ? <p className="text-red-400">Failed to load: {error}</p>
@@ -1283,7 +1399,7 @@ export default function Home() {
                     <p><span className="text-gray-300">Construction:</span> Stage=site_inspection · Queue=8 · Processing=320s · Throughput=1/hr</p>
                   </div>
                 </div>
-                <p className="text-xs text-gray-600">💡 If you upload a file, the AI will automatically figure out which of your columns map to these fields — your columns don't need to be named exactly this way.</p>
+                <p className="text-xs text-gray-600">💡 If you upload a file, the AI will automatically figure out which of your columns map to these fields — your columns don&apos;t need to be named exactly this way.</p>
               </div>
             )}
 
@@ -1382,7 +1498,7 @@ export default function Home() {
                       {Object.entries(uploadResult.column_mapping).map(([field, col]) => (
                         <div key={field} className="flex items-center gap-2">
                           <span className="text-gray-500 capitalize">{field.replace(/_/g, ' ')}:</span>
-                          <span className="text-indigo-400 font-medium">"{col}"</span>
+                          <span className="text-indigo-400 font-medium">&quot;{col}&quot;</span>
                         </div>
                       ))}
                     </div>

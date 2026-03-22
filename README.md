@@ -1,325 +1,256 @@
 # Ops Intelligence Platform
 
-**AI-powered workflow monitoring, bottleneck detection, and operational intelligence — across any industry.**
+AI-powered workflow monitoring, bottleneck detection, and operational intelligence across multiple industries.
 
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-ops--intelligence--platform.vercel.app-6366f1?style=for-the-badge)](https://ops-intelligence-platform.vercel.app)
-[![API Docs](https://img.shields.io/badge/API%20Docs-Render-22c55e?style=for-the-badge)](https://ops-intelligence-platform.onrender.com/docs)
-[![GitHub](https://img.shields.io/badge/GitHub-kushaljaink-181717?style=for-the-badge&logo=github)](https://github.com/kushaljaink/ops-intelligence-platform)
-[![Built With](https://img.shields.io/badge/Built%20With-Groq%20%7C%20FastAPI%20%7C%20Next.js-orange?style=for-the-badge)]()
+## Current Live Data Coverage
 
----
+Live-supported industries backed only by free official/public sources:
 
-## What It Does
+| Industry | Key | Source | Env vars | Mode |
+|---|---|---|---|---|
+| Energy | `energy` | U.S. EIA API | `EIA_API_KEY` | Hybrid |
+| Water | `water` | USGS Water Services | `USGS_API_KEY` optional | Hybrid |
+| Weather | `weather` | NOAA / NWS Alerts API | `NOAA_USER_AGENT` recommended | Hybrid |
+| Airport | `airport` | FAA delays / NAS status page | `FAA_ENABLED` optional | Hybrid |
+| Healthcare | `healthcare` | CMS Provider Data API | none required | Hybrid |
 
-Organizations run critical workflows across many systems, teams, and handoffs. When those workflows break, the consequences are real — delays, revenue loss, customer impact, and teams firefighting instead of working proactively.
+`Hybrid` means the app attempts live refresh first and gracefully falls back to demo-style incidents if the source fails, rate-limits, or is not configured.
 
-**Ops Intelligence Platform detects workflow bottlenecks before they become crises.**
+Demo-only industries remain available with seeded data and the existing intelligence features:
+`cruise`, `banking`, `ecommerce`, `construction`, `civil`, `architecture`, `traffic`, `telecom`, `manufacturing`, `retail`, `food`, `pharma`, `government`, `realestate`, `education`, `media`, and `custom`.
 
-Anyone can visit the live URL, sign up for free, connect their real operational data via webhook, and get AI-powered root cause analysis, cascade predictions, breach forecasts, and autonomous agent investigations — all with human approval at every consequential step.
+## Architecture
 
----
+- Frontend: Next.js 16 + React 19 + TypeScript
+- Backend: FastAPI
+- Database/Auth: Supabase
+- AI analysis + agent: Groq
+- Live data orchestration: `backend/services/live_data_service.py`
+- Shared connector CLI: `real_data_connectors.py`
 
-## Live Demo
+## Free-Only Live Sources
 
-🌐 **Frontend:** https://ops-intelligence-platform.vercel.app
-🔧 **Backend API:** https://ops-intelligence-platform.onrender.com/docs
-💻 **GitHub:** https://github.com/kushaljaink/ops-intelligence-platform
+The project intentionally avoids paid vendors, trials, or freemium lock-in.
 
-> ⚠️ Backend runs on Render's free tier — spins down after 15 min of inactivity. First request may take 30–50 seconds. Visit `/health` to wake it up before a demo.
+- Energy uses the free U.S. EIA API.
+- Water uses USGS Water Services. `USGS_API_KEY` is optional and mainly useful for higher-volume usage.
+- Weather uses NOAA / National Weather Service Alerts. No paid vendor is used.
+- Airport uses official FAA public status data. No commercial aviation provider is used.
+- Healthcare uses CMS public provider performance data.
 
----
+Intentionally skipped:
 
-## What Companies Did Before This
+- TomTom
+- commercial traffic APIs
+- paid aviation APIs
+- any vendor that requires billing setup
 
-| Tier | Tool | Problem |
-|---|---|---|
-| Tier 1 | Basic dashboards | Numbers on a screen. React after damage is done. |
-| Tier 2 | Alert systems | Threshold breached → email. Still reactive. No context, no root cause. |
-| Tier 3 | BI Tools (Tableau, PowerBI) | Beautiful historical reports. Tell you what happened, not what's about to happen. |
-| Tier 4 | Enterprise platforms (ServiceNow) | $50k–$500k/year, months of integration, built for IT. No predictive AI layer. |
+## Fallback Behavior
 
-**This platform is different.** It reasons about your data, predicts cascades before they happen, simulates the impact of operational changes, correlates alerts to cut noise, and runs an autonomous AI agent that investigates — then waits for your approval before acting.
+For live-supported industries, the backend never lets a source outage break the app.
 
----
+If a source:
 
-## How It's Different From Claude / ChatGPT
+- fails
+- rate-limits
+- returns malformed data
+- requires a missing env var
 
-| | Claude / ChatGPT | This Platform |
-|---|---|---|
-| What it knows | Everything generally | Your specific operational data |
-| How triggered | You ask it | Monitors and acts autonomously |
-| Memory | Per conversation | 30 days persistent in database |
-| Output | Generic text answers | Specific numbers, predictions, SOPs |
-| Integration | Standalone chat | Live data via webhooks, file upload, API |
-| Role of AI | The product | The reasoning engine inside a larger system |
+then the backend:
 
----
+- logs the failure
+- returns deterministic fallback incidents
+- tags the response with `data_mode = fallback`
+- keeps the dashboard usable instead of failing hard
 
-## Supported Industries
-
-8 industries with calibrated thresholds, 30 days of seeded historical data with realistic patterns, and industry-appropriate AI analysis:
-
-| Industry | Key Stages | Critical Thresholds |
-|---|---|---|
-| Cruise Terminal | Baggage Drop → Security → Biometrics | Queue > 50, Processing > 300s |
-| Healthcare | ED Triage → Bed Allocation → Diagnostics | Queue > 20, Processing > 120s |
-| Banking & Finance | Loan Verification → KYC → Approval | Queue > 100, Processing > 600s |
-| E-commerce & Logistics | Warehouse → Dispatch → Returns | Queue > 200, Processing > 180s |
-| Airport Operations | Check-in → Security → Boarding | Queue > 80, Processing > 240s |
-| Construction Management | Material Delivery → Framing → Inspection | Queue > 5, Processing > 240s |
-| Civil Engineering | Earthworks → Quality Check → Drainage | Queue > 8, Processing > 480s |
-| Architecture & Design | Design Review → Permit → Revision | Queue > 10, Processing > 720s |
-| Custom | Any workflow you define | User-configurable |
-
----
-
-## Intelligence Engine — 5 Phases
-
-### Phase 1 — Data Foundation
-30 days of realistic historical metrics per industry with seeded behavioral patterns: Monday morning material delivery spikes for construction, Thursday/Friday cascade failures for cruise terminals, Monday/Friday deadline rushes for architecture. Powers all downstream intelligence.
-
-### Phase 2 — Pattern Intelligence
-- **Stage Health Scores** — 0–100 score per stage based on last 24hrs of metrics with improving/degrading/stable trend indicators
-- **Recurring Pattern Detection** — identifies stages that fail repeatedly, pinpoints peak failure hours and days from 30 days of data
-- **Cascade Prediction** — detects when Stage A failing causes Stage B to degrade 2hrs later; shows confidence % and fires live alerts when source stage is currently stressed
-- **Anomaly Scoring** — flags stages running below their 30-day baseline before they hit threshold
-
-### Phase 3 — Predictive Intelligence
-- **ETA to Breach** — linear regression on health score trajectory; projects hours until each stage hits critical threshold (40/100)
-- **7-Day Capacity Forecast** — maps 30-day historical breach patterns to the next 7 days; warns about high-risk time windows before they happen
-- **What-If Simulation** — simulates operational changes (add staff, reduce queue, upgrade equipment, extend hours) and shows projected before/after metrics with AI assessment
-
-### Phase 4 — Recommendation Intelligence
-- **Confidence Scoring** — every AI analysis shows a 0–100% confidence score extracted from Groq's language, with a visual confidence bar
-- **Grounded Analysis** — AI is given actual metric values (queue=67, processing=420s, health trajectory 81→74→65) before analyzing — no generic advice
-- **Outcome Tracking** — after resolving an incident, logs what action was taken, categorizes it (staffing/equipment/process/escalation), and records health before and after
-- **Resolution Effectiveness** — tracks per-stage resolution rates, recurrence gaps, and avg resolution time; flags stages where fixes aren't holding
-- **Playbook Generator** — generates full SOPs (trigger conditions, immediate actions, escalation, root cause checklist, prevention) grounded in actual past incident data
-
-### Phase 5 — Human-in-the-Loop AI Agent
-An autonomous agent built on Groq's native tool-calling API. Investigates the operation using 5 tools, then surfaces every consequential decision to the user before acting. **The agent never acts without user approval.**
-
-**Agent tools:**
-- `check_health_scores` — current 0–100 score per stage
-- `get_open_incidents` — all active incidents with IDs and severity
-- `get_cascade_predictions` — active cascade risks with confidence %
-- `get_eta_to_breach` — urgency of declining stages via linear regression
-- `get_recurring_patterns` — 30-day pattern data for a specific stage
-
----
-
-## Additional Features
-
-### Authentication & User Data Isolation
-- Email/password signup via Supabase Auth
-- Unauthenticated visitors see demo data only
-- Signed-in users see demo data + their own private operational data
-- Personal API keys generated on signup for webhook authentication
-
-### Connect Your System (Webhook)
-- `POST /webhook/events` accepts live operational data from any system
-- Curl, Python, and JavaScript code snippets available in the dashboard
-- **Alert correlation** — duplicate incidents on the same stage within 30 minutes are merged instead of creating noise
-- **Test button** — send a sample event and watch it appear as a live incident
-
-### File Upload with AI Column Mapping
-- Upload any Excel or CSV file — Groq automatically maps your columns to stage/queue/processing/throughput
-- No specific format required — works with whatever column names you already use
-
-### Slack Alerts
-- HIGH severity incidents and new community suggestions trigger Slack notifications
-- Configurable via `SLACK_WEBHOOK_URL` environment variable
-
-### Community Suggestions
-- Built-in feedback form on the dashboard
-- All suggestions visible to everyone in real time
-- New suggestions trigger email notification to the platform owner
-
-### Email Alerts
-- HIGH severity incidents trigger email via Resend
-- Community suggestions trigger notification emails
-
-### Audit Trail
-- Every AI analysis, agent investigation, and resolution outcome logged with timestamps
-
----
-
-## Tech Stack
-
-| Layer | Technology | Notes |
-|---|---|---|
-| Frontend | Next.js 16 + TypeScript + Tailwind | Deployed on Vercel, auto-deploys on push |
-| Backend API | FastAPI (Python) | Deployed on Render free tier |
-| Database | Supabase (PostgreSQL) | 7 tables with RLS, user isolation |
-| Auth | Supabase Auth | Email/password, JWT, personal API keys |
-| AI — Production | Groq (llama-3.3-70b-versatile) | Free tier, 2–3 second response times |
-| AI — Local Dev | Ollama + llama3.2 | Still works locally for development |
-| Agent | Groq native tool-calling | No LangChain — direct function calling |
-| File Parsing | openpyxl + python-multipart | Excel and CSV upload support |
-| Email | Resend | Alerts for HIGH severity incidents |
-| Slack | Incoming Webhooks | Real-time ops alerts |
-| Frontend Hosting | Vercel | Always on, auto-deploy |
-| Backend Hosting | Render | Free tier, spins down after 15 min |
-
----
-
-## API Reference
-
-### Core
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/health` | Health check |
-| GET | `/auth/me` | Get authenticated user info and API key |
-| GET | `/incidents?industry=cruise` | Get incidents (demo + user's own if authenticated) |
-| GET | `/incidents/stats?industry=cruise` | Stats with trend vs yesterday |
-| PATCH | `/incidents/{id}/resolve` | Mark incident resolved |
-| POST | `/analyze-incident/{id}` | AI analysis grounded in actual metrics |
-| POST | `/incidents/{id}/outcome` | Log resolution action and outcome |
-| GET | `/incidents/{id}/analysis-history` | Full AI analysis history |
-
-### Intelligence Engine
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/intelligence/health-scores?industry=cruise` | Stage health scores + trend |
-| GET | `/intelligence/recurring-patterns?industry=cruise` | 30-day breach pattern analysis |
-| GET | `/intelligence/cascade-predictions?industry=cruise` | Active cascade risks with confidence % |
-| GET | `/intelligence/anomaly-scores?industry=cruise` | Anomaly vs 30-day baseline |
-| GET | `/intelligence/eta-to-breach?industry=cruise` | Hours to critical threshold |
-| GET | `/intelligence/capacity-forecast?industry=cruise` | 7-day risk forecast |
-| GET | `/intelligence/whatif-simulation` | Simulate operational changes |
-| GET | `/intelligence/resolution-effectiveness?industry=cruise` | Per-stage resolution analytics |
-| GET | `/intelligence/playbook/{stage}?industry=cruise` | Generate AI-powered SOP |
-
-### AI Agent
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/agent/investigate` | Run autonomous AI agent investigation |
-| POST | `/agent/decision` | Submit human decision on agent finding |
-
-### Data Ingestion
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/webhook/events` | Ingest live operational data (supports `api_key` for user isolation) |
-| POST | `/test-webhook?industry=healthcare` | Send a test event |
-| GET | `/connect-info` | Get webhook URL and code snippets |
-| POST | `/analyze-custom` | Analyze custom workflow data (form/CSV) |
-| POST | `/extract-and-analyze` | Upload any file — AI maps columns automatically |
-
-### Community
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/suggestions` | Submit an improvement suggestion |
-| GET | `/suggestions` | Get all community suggestions |
-
----
-
-## Database Schema
-
-```sql
-incidents           -- Active incidents per industry and stage, user_id for isolation
-workflow_metrics    -- Raw time-series metrics, user_id for isolation
-analysis_logs       -- AI analysis history with confidence scores
-incident_outcomes   -- Logged resolution actions and health before/after
-recommendations     -- Static recommendations per incident
-suggestions         -- Community improvement suggestions
-user_api_keys       -- Personal API keys for webhook authentication
-```
-
----
+If live fetch succeeds, returned incident metadata is tagged with `data_mode = live`.
 
 ## Local Development
 
-**Prerequisites:** Python 3.11+, Node.js 20+, Supabase account, Groq API key (free at console.groq.com)
+### Prerequisites
 
-```bash
-# Clone
+- Python 3.11+
+- Node.js 20+
+- Supabase project
+- Groq API key
+
+### 1. Clone and install
+
+```powershell
 git clone https://github.com/kushaljaink/ops-intelligence-platform
 cd ops-intelligence-platform
+```
 
-# Backend
+### 2. Backend setup
+
+```powershell
 cd backend
 python -m venv venv
-venv\Scripts\activate          # Windows
+.\venv\Scripts\activate
 pip install -r requirements.txt
+```
 
-# backend/.env
-SUPABASE_URL=your_project_url
+Create `backend/.env`:
+
+```env
+SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_KEY=your_service_role_key
 GROQ_API_KEY=your_groq_key
-SUPABASE_JWT_SECRET=your_jwt_secret
-SLACK_WEBHOOK_URL=optional
+SUPABASE_JWT_SECRET=your_supabase_jwt_secret
+RESEND_API_KEY=
+ALERT_EMAIL=
+SLACK_WEBHOOK_URL=
+WEBHOOK_SECRET=
+EIA_API_KEY=
+USGS_API_KEY=
+NOAA_USER_AGENT=OpsIntelligence/1.0 (your-email@example.com)
+FAA_ENABLED=true
+```
 
-uvicorn main:app --reload      # http://localhost:8000
+Run the API:
 
-# Frontend (new terminal)
-cd frontend
+```powershell
+uvicorn main:app --reload
+```
+
+Backend runs on `http://localhost:8000`.
+
+### 3. Frontend setup
+
+```powershell
+cd ..\frontend
 npm install
-
-# frontend/.env.local
-NEXT_PUBLIC_SUPABASE_URL=your_project_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
-
-npm run dev                    # http://localhost:3000
 ```
 
----
+Create `frontend/.env.local`:
 
-## Connecting Real Data
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+```
 
-Once signed in, get your personal API key from the **Connect** panel. Then POST your operational metrics:
+Run the frontend:
 
-```python
-import httpx
+```powershell
+npm run dev
+```
 
-httpx.post("https://ops-intelligence-platform.onrender.com/webhook/events", json={
-    "api_key": "your_personal_api_key",
-    "events": [{
+Frontend runs on `http://localhost:3000`.
+
+## Deployment Env Vars
+
+### Render backend
+
+Set:
+
+- `SUPABASE_URL`
+- `SUPABASE_KEY`
+- `GROQ_API_KEY`
+- `SUPABASE_JWT_SECRET`
+- `RESEND_API_KEY` optional
+- `ALERT_EMAIL` optional
+- `SLACK_WEBHOOK_URL` optional
+- `WEBHOOK_SECRET` optional
+- `EIA_API_KEY`
+- `USGS_API_KEY` optional
+- `NOAA_USER_AGENT`
+- `FAA_ENABLED`
+
+### Vercel frontend
+
+Set:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+## Live Fetch Endpoint
+
+The dashboard calls:
+
+```http
+POST /fetch-live-data?industry=<industry>
+```
+
+Supported values:
+
+- `energy`
+- `water`
+- `weather`
+- `airport`
+- `healthcare`
+- `all`
+
+`all` continues processing even if one source fails.
+
+Response shape:
+
+```json
+{
+  "success": true,
+  "industry": "energy",
+  "data_mode": "live",
+  "incident_count": 2,
+  "incidents": [],
+  "summary": {}
+}
+```
+
+## Sample curl Commands
+
+Fetch one live industry:
+
+```bash
+curl -X POST "http://localhost:8000/fetch-live-data?industry=energy"
+```
+
+Fetch all live industries:
+
+```bash
+curl -X POST "http://localhost:8000/fetch-live-data?industry=all"
+```
+
+Send your own webhook metrics:
+
+```bash
+curl -X POST "http://localhost:8000/webhook/events" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "events": [
+      {
         "stage": "ed_triage",
-        "queue_size": 32,
-        "processing_time_seconds": 210,
-        "throughput": 7,
+        "queue_size": 28,
+        "processing_time_seconds": 3200,
+        "throughput": 4,
         "industry": "healthcare"
-    }]
-})
+      }
+    ]
+  }'
 ```
 
-Your data appears privately on your dashboard. The platform automatically detects threshold breaches, correlates related alerts, calculates health scores, and makes the incident available for AI analysis and agent investigation.
+Run the shared connector CLI in dry-run mode:
 
----
+```powershell
+python real_data_connectors.py --industry weather --dry-run
+python real_data_connectors.py --all --dry-run
+```
 
-## Maintenance (Free Tier)
+## Important Notes
 
-**Weekly:** Visit Supabase dashboard to keep project active (pauses after 7 days). Visit `/health` to wake Render.
+- `EIA_API_KEY` is free to obtain from EIA.
+- `USGS_API_KEY` is optional; low-volume usage works without it when USGS allows anonymous access.
+- NOAA / NWS does not require a paid key, but a descriptive `NOAA_USER_AGENT` is recommended.
+- FAA is sourced from official public FAA data only.
+- Seeded demo incidents and existing product features remain intact.
 
-**Before a demo:**
-1. Visit `/health` — wait for `{"status":"ok"}`
-2. Refresh the dashboard — confirm incidents load
-3. Click **Analyze with AI** on one incident — confirm Groq responds in ~3 seconds
-4. Run **AI Agent Investigation** — confirm 5 tool calls complete
-5. Share the link
+## Verification Checklist
 
----
+1. Start backend and frontend locally.
+2. Open the dashboard and switch to `healthcare`, `airport`, `energy`, `water`, and `weather`.
+3. Confirm the status chip changes to either `Live Data` or `Fallback Demo Data`.
+4. Call `POST /fetch-live-data?industry=all` and verify you get per-industry result summaries.
+5. Confirm demo-only industries still load without trying live refresh.
+6. Run `python real_data_connectors.py --all --dry-run` and inspect the normalized incident payloads.
+7. Temporarily unset `EIA_API_KEY` and verify `energy` falls back instead of crashing.
+8. Confirm existing AI analysis, playbooks, agent investigation, and webhook ingestion still work.
 
-## Contributing
-
-**From the live site** — go to the **Community** tab in the Intelligence Engine and submit a suggestion. Shows up live for everyone.
-
-**Via GitHub** — open an issue at [github.com/kushaljaink/ops-intelligence-platform/issues](https://github.com/kushaljaink/ops-intelligence-platform/issues).
-
-**Adding a new industry:**
-1. Add thresholds to `INDUSTRY_THRESHOLDS` in `main.py` and `ops_agent.py`
-2. Add context to `INDUSTRY_CONTEXT` in `page.tsx`
-3. Add to `INDUSTRIES` array in `page.tsx`
-4. Seed demo incidents and 30 days of metrics via SQL
-
----
-
-## Built By
-
-**Kushal Jain** — March 2026
-
-Built end-to-end using VS Code + Claude Code + Claude.ai.
-
-🌐 https://ops-intelligence-platform.vercel.app
-💻 https://github.com/kushaljaink/ops-intelligence-platform
-🔧 https://ops-intelligence-platform.onrender.com/docs
+Detailed request/response examples and manual checks are in [LIVE_DATA_VERIFICATION.md](/c:/Users/Kushal%20Jain/ops-intelligence-platform/LIVE_DATA_VERIFICATION.md).
