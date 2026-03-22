@@ -1,5 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { supabase } from '../lib/supabase'
+import type { Session } from '@supabase/supabase-js'
 
 type Incident = {
   id: string; stage: string; severity: string; description: string
@@ -23,6 +25,8 @@ type WhatIfResult = { stage: string; change_description: string; current: { queu
 type ResolutionEffectiveness = { stage: string; total_incidents: number; resolved: number; open: number; high_severity: number; resolution_rate: number; avg_resolution_minutes: number | null; avg_gap_hours: number | null; is_recurring: boolean; effectiveness: string; most_common_action: string | null; insight: string }
 type Playbook = { stage: string; playbook: string; data_summary: { total_incidents: number; resolution_rate: number; actions_recorded: number; best_actions: string[]; generated_at: string } } | null
 type OutcomeResult = { success: boolean; action_category: string; health_before: number | null; health_after: number | null; improvement: number | null } | null
+type AuthView = 'login' | 'signup'
+
 type Suggestion = {
   id: string
   category: string
@@ -128,6 +132,16 @@ export default function Home() {
   const [stats, setStats] = useState<Stats | null>(null)
 
   // Outcome tracking
+  const [session, setSession] = useState<Session | null>(null)
+  const [showAuth, setShowAuth] = useState(false)
+  const [authView, setAuthView] = useState<AuthView>('login')
+  const [authEmail, setAuthEmail] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const [authLoading, setAuthLoading] = useState(false)
+  const [authError, setAuthError] = useState<string | null>(null)
+  const [authSuccess, setAuthSuccess] = useState<string | null>(null)
+  const [userApiKey, setUserApiKey] = useState<string | null>(null)
+  const [showApiKey, setShowApiKey] = useState(false)
   const [showAbout, setShowAbout] = useState(false)
   const [showConnect, setShowConnect] = useState(false)
   const [connectInfo, setConnectInfo] = useState<{webhook_url: string; curl_example: string; python_example: string; javascript_example: string} | null>(null)
@@ -234,12 +248,26 @@ export default function Home() {
   const fetchData = (industry: string) => {
     setLoading(true); setError(null); setIncidents([]); setAnalyses({}); setStats(null)
     Promise.all([
-      fetch(`${BACKEND}/incidents?industry=${industry}`).then(r => r.json()),
-      fetch(`${BACKEND}/incidents/stats?industry=${industry}`).then(r => r.json()),
+      fetch(`${BACKEND}/incidents?industry=${industry}`, { headers: getAuthHeaders() }).then(r => r.json()),
+      fetch(`${BACKEND}/incidents/stats?industry=${industry}`, { headers: getAuthHeaders() }).then(r => r.json()),
     ])
       .then(([incData, statsData]) => { setIncidents(incData.incidents ?? []); setStats(statsData); setLoading(false) })
       .catch(err => { setError(err.message); setLoading(false) })
   }
+
+  useEffect(() => {
+    // Auth listener
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session)
+      if (session?.access_token) fetchUserApiKey(session.access_token)
+    })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session)
+      if (session?.access_token) fetchUserApiKey(session.access_token)
+    })
+    return () => subscription.unsubscribe()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     fetchData(industryValue)
@@ -434,6 +462,48 @@ export default function Home() {
     } catch { /* ignore */ }
   }
 
+  const getAuthHeaders = (): Record<string, string> => {
+    if (!session?.access_token) return {}
+    return { Authorization: `Bearer ${session.access_token}` }
+  }
+
+  const handleAuth = async () => {
+    setAuthLoading(true)
+    setAuthError(null)
+    setAuthSuccess(null)
+    try {
+      if (authView === 'signup') {
+        const { error } = await supabase.auth.signUp({ email: authEmail, password: authPassword })
+        if (error) throw error
+        setAuthSuccess('Check your email to confirm your account, then log in.')
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword })
+        if (error) throw error
+        setShowAuth(false)
+      }
+    } catch (e: unknown) {
+      setAuthError(e instanceof Error ? e.message : 'Authentication failed')
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut()
+    setSession(null)
+    setUserApiKey(null)
+  }
+
+  const fetchUserApiKey = async (token: string) => {
+    try {
+      const r = await fetch(`${BACKEND}/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      const d = await r.json()
+      if (d.api_key) setUserApiKey(d.api_key)
+    } catch { /* ignore */ }
+  }
+
   const fetchConnectInfo = async () => {
     try {
       const r = await fetch(`${BACKEND}/connect-info`)
@@ -550,6 +620,28 @@ export default function Home() {
           <div className="flex items-center justify-between mb-4">
             <p className="text-gray-400 text-base ml-5">AI-powered workflow monitoring & bottleneck detection — <span className="text-indigo-400 font-medium">{selectedIndustry === 'custom' && customIndustry ? `${customIndustry.charAt(0).toUpperCase() + customIndustry.slice(1)} Operations` : industryLabel}</span></p>
             <div className="flex items-center gap-2 shrink-0">
+              {session ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowConnect(true)}
+                    className="flex items-center gap-2 px-3 py-2 rounded-xl bg-green-600/20 border border-green-500/40 text-xs text-green-400 font-medium transition-colors"
+                  >
+                    <span>✓</span>
+                    <span>{session.user.email?.split('@')[0]}</span>
+                  </button>
+                  <button onClick={handleSignOut} className="px-3 py-2 rounded-xl bg-gray-800 border border-gray-700 text-xs text-gray-400 hover:text-white transition-colors">
+                    Sign out
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => { setShowAuth(true); setAuthView('login') }}
+                  className="flex items-center gap-2 px-4 py-2 rounded-full text-sm text-gray-400 hover:text-white bg-gray-800 border border-gray-700 hover:border-indigo-500/40 transition-colors"
+                >
+                  <span>👤</span>
+                  <span>Sign in</span>
+                </button>
+              )}
               <button
                 onClick={() => setShowConnect(true)}
                 className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold text-green-400 hover:text-white bg-green-500/10 hover:bg-green-600 border border-green-500/40 hover:border-green-500 transition-colors"
@@ -1392,6 +1484,65 @@ export default function Home() {
       </div>
     </main>
 
+    {showAuth && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setShowAuth(false)} />
+        <div className="relative w-full max-w-sm bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-lg font-bold text-white">{authView === 'login' ? 'Sign in' : 'Create account'}</h2>
+            <button onClick={() => setShowAuth(false)} className="text-gray-500 hover:text-white text-2xl leading-none">×</button>
+          </div>
+          <div className="space-y-4">
+            <div>
+              <label className="text-xs text-gray-400 mb-1 block">Email</label>
+              <input
+                type="email"
+                value={authEmail}
+                onChange={e => setAuthEmail(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleAuth()}
+                placeholder="you@example.com"
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 mb-1 block">Password</label>
+              <input
+                type="password"
+                value={authPassword}
+                onChange={e => setAuthPassword(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleAuth()}
+                placeholder="••••••••"
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+            {authError && <p className="text-xs text-red-400">{authError}</p>}
+            {authSuccess && <p className="text-xs text-green-400">{authSuccess}</p>}
+            <button
+              onClick={handleAuth}
+              disabled={authLoading || !authEmail || !authPassword}
+              className="w-full py-2.5 rounded-lg text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition-colors"
+            >
+              {authLoading ? 'Please wait…' : authView === 'login' ? 'Sign in' : 'Create account'}
+            </button>
+            <p className="text-xs text-center text-gray-500">
+              {authView === 'login' ? "Don't have an account?" : 'Already have an account?'}{' '}
+              <button
+                onClick={() => { setAuthView(authView === 'login' ? 'signup' : 'login'); setAuthError(null); setAuthSuccess(null) }}
+                className="text-indigo-400 hover:text-indigo-300 transition-colors"
+              >
+                {authView === 'login' ? 'Sign up' : 'Sign in'}
+              </button>
+            </p>
+          </div>
+          {authView === 'login' && (
+            <div className="mt-4 pt-4 border-t border-gray-800">
+              <p className="text-xs text-gray-600 text-center">Sign in to connect your own operational data and keep it private from other visitors.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    )}
+
     {showConnect && (
       <div className="fixed inset-0 z-50 flex justify-end">
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowConnect(false)} />
@@ -1445,6 +1596,34 @@ export default function Home() {
                 >Copy</button>
               </div>
             </div>
+
+            {session && userApiKey && (
+              <div>
+                <p className="text-xs font-semibold text-white uppercase tracking-wider mb-2">Your API Key</p>
+                <p className="text-xs text-gray-500 mb-2">Add this to your webhook requests so your data stays private and linked to your account.</p>
+                <div className="flex items-center gap-2 p-3 rounded-lg bg-gray-800 border border-green-500/30">
+                  <code className="text-green-400 text-xs flex-1 break-all">
+                    {showApiKey ? userApiKey : '••••••••••••••••••••••••••••••••'}
+                  </code>
+                  <button onClick={() => setShowApiKey(prev => !prev)} className="text-xs text-gray-500 hover:text-white px-2 py-1 rounded bg-gray-700">
+                    {showApiKey ? 'Hide' : 'Show'}
+                  </button>
+                  <button onClick={() => navigator.clipboard.writeText(userApiKey)} className="text-xs text-gray-500 hover:text-white px-2 py-1 rounded bg-gray-700">
+                    Copy
+                  </button>
+                </div>
+                <p className="text-xs text-gray-600 mt-2">Add <code className="text-gray-400">&quot;api_key&quot;: &quot;your_key&quot;</code> to your webhook JSON body.</p>
+              </div>
+            )}
+
+            {!session && (
+              <div className="p-3 rounded-lg bg-indigo-500/5 border border-indigo-500/20">
+                <p className="text-xs text-gray-400">
+                  <button onClick={() => { setShowConnect(false); setShowAuth(true); setAuthView('login') }} className="text-indigo-400 hover:text-indigo-300 transition-colors">Sign in</button>
+                  {' '}to get a personal API key and keep your operational data private.
+                </p>
+              </div>
+            )}
 
             <div>
               <div className="flex items-center justify-between mb-3">

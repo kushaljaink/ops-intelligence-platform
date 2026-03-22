@@ -1,5 +1,6 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi import UploadFile, File, Form
+import jwt as pyjwt
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from pydantic import BaseModel
@@ -30,6 +31,7 @@ RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 ALERT_EMAIL = os.getenv("ALERT_EMAIL", "")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
+SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
 
 INDUSTRY_THRESHOLDS = {
     "cruise":        {"queue": 50,  "processing": 300, "throughput": 10},
@@ -125,6 +127,21 @@ async def send_slack_alert(stage: str, severity: str, description: str, industry
         pass  # Never let Slack failure break the main flow
 
 
+def get_user_id(request: Request) -> Optional[str]:
+    """Extract user_id from Supabase JWT token if present. Returns None for unauthenticated."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None
+    token = auth_header[7:]
+    if not SUPABASE_JWT_SECRET:
+        return None
+    try:
+        payload = pyjwt.decode(token, SUPABASE_JWT_SECRET, algorithms=["HS256"], options={"verify_aud": False})
+        return payload.get("sub")
+    except Exception:
+        return None
+
+
 # ─── Core routes ──────────────────────────────────────────────────────────────
 
 @app.get("/health")
@@ -132,10 +149,35 @@ def health():
     return {"status": "ok", "service": "Ops Intelligence Platform"}
 
 
+@app.get("/auth/me")
+def get_me(request: Request):
+    user_id = get_user_id(request)
+    if not user_id:
+        return {"authenticated": False, "user_id": None}
+    # Get or create API key for this user
+    existing = supabase.table("user_api_keys").select("api_key, label").eq("user_id", user_id).limit(1).execute()
+    if existing.data:
+        api_key = existing.data[0]["api_key"]
+    else:
+        result = supabase.table("user_api_keys").insert({"user_id": user_id, "label": "Default"}).execute()
+        api_key = result.data[0]["api_key"] if result.data else None
+    return {"authenticated": True, "user_id": user_id, "api_key": api_key}
+
+
 @app.get("/incidents")
-def get_incidents(industry: str = "cruise"):
-    response = supabase.table("incidents").select("*").eq("industry", industry).order("created_at", desc=True).execute()
-    return {"incidents": response.data}
+def get_incidents(request: Request, industry: str = "cruise"):
+    user_id = get_user_id(request)
+    if user_id:
+        # Authenticated: show demo data (user_id is NULL) + their own data
+        all_incidents = supabase.table("incidents").select("*").eq("industry", industry).is_("user_id", "null").order("created_at", desc=True).execute()
+        user_incidents = supabase.table("incidents").select("*").eq("industry", industry).eq("user_id", user_id).order("created_at", desc=True).execute()
+        combined = (user_incidents.data or []) + (all_incidents.data or [])
+        combined.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        return {"incidents": combined, "user_id": user_id}
+    else:
+        # Unauthenticated: show demo data only
+        response = supabase.table("incidents").select("*").eq("industry", industry).is_("user_id", "null").order("created_at", desc=True).execute()
+        return {"incidents": response.data, "user_id": None}
 
 
 @app.get("/incidents/stats")
@@ -1129,11 +1171,18 @@ class WebhookEvent(BaseModel):
 class WebhookPayload(BaseModel):
     events: List[WebhookEvent]
     secret: Optional[str] = None
+    api_key: Optional[str] = None
 
 @app.post("/webhook/events")
 async def receive_webhook(payload: WebhookPayload):
     if WEBHOOK_SECRET and payload.secret != WEBHOOK_SECRET:
         raise HTTPException(status_code=401, detail="Invalid secret")
+    # Resolve user from API key
+    webhook_user_id = None
+    if payload.api_key:
+        key_resp = supabase.table("user_api_keys").select("user_id").eq("api_key", payload.api_key).limit(1).execute()
+        if key_resp.data:
+            webhook_user_id = key_resp.data[0]["user_id"]
     created = []
     for event in payload.events:
         industry = event.industry
@@ -1168,6 +1217,7 @@ async def receive_webhook(payload: WebhookPayload):
                     "description": ". ".join(violations),
                     "status": "open",
                     "industry": industry,
+                    "user_id": webhook_user_id,
                 }).execute()
                 if inc.data:
                     created.append(inc.data[0])
