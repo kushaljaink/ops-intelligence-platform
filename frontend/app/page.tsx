@@ -511,9 +511,17 @@ export default function Home() {
             <div className="w-2 h-8 bg-indigo-500 rounded-full" />
             <h1 className="text-4xl font-extrabold tracking-tight">Ops Intelligence Platform</h1>
           </div>
-          <p className="text-gray-400 text-base ml-5 mb-4">AI-powered workflow monitoring & bottleneck detection — <span className="text-indigo-400 font-medium">{selectedIndustry === 'custom' && customIndustry ? `${customIndustry.charAt(0).toUpperCase() + customIndustry.slice(1)} Operations` : industryLabel}</span></p>
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex flex-wrap gap-2 ml-5">
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-gray-400 text-base ml-5">AI-powered workflow monitoring & bottleneck detection — <span className="text-indigo-400 font-medium">{selectedIndustry === 'custom' && customIndustry ? `${customIndustry.charAt(0).toUpperCase() + customIndustry.slice(1)} Operations` : industryLabel}</span></p>
+            <button
+              onClick={() => setShowAbout(true)}
+              className="flex items-center gap-2 px-5 py-2 rounded-full text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-400 shadow-lg shadow-indigo-500/40 transition-colors shrink-0"
+            >
+              <span>✦</span>
+              <span>How It Works</span>
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2 ml-5">
               {INDUSTRIES.filter(i => i.value !== 'custom').map(i => (
                 <button
                   key={i.value}
@@ -545,14 +553,6 @@ export default function Home() {
                   className="bg-gray-800 border border-gray-600 rounded-full px-4 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 w-40"
                 />
               )}
-            </div>
-            <button
-              onClick={() => setShowAbout(true)}
-              className="flex items-center gap-2 px-5 py-2 rounded-full text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-400 shadow-lg shadow-indigo-500/40 transition-colors shrink-0"
-            >
-              <span>✦</span>
-              <span>How It Works</span>
-            </button>
           </div>
         </div>
 
