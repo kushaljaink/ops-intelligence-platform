@@ -42,6 +42,18 @@ INDUSTRY_THRESHOLDS = {
     "construction":  {"queue": 5,   "processing": 240, "throughput": 3},
     "civil":         {"queue": 8,   "processing": 480, "throughput": 2},
     "architecture":  {"queue": 10,  "processing": 720, "throughput": 1},
+    "energy":        {"queue": 20,  "processing": 300, "throughput": 5},
+    "water":         {"queue": 15,  "processing": 600, "throughput": 3},
+    "traffic":       {"queue": 100, "processing": 120, "throughput": 30},
+    "telecom":       {"queue": 200, "processing": 1800, "throughput": 10},
+    "manufacturing": {"queue": 50,  "processing": 300, "throughput": 20},
+    "retail":        {"queue": 30,  "processing": 600, "throughput": 15},
+    "food":          {"queue": 20,  "processing": 900, "throughput": 10},
+    "pharma":        {"queue": 10,  "processing": 3600, "throughput": 2},
+    "government":    {"queue": 500, "processing": 86400, "throughput": 1},
+    "realestate":    {"queue": 50,  "processing": 172800, "throughput": 1},
+    "education":     {"queue": 500, "processing": 86400, "throughput": 5},
+    "media":         {"queue": 1000,"processing": 3600, "throughput": 50},
 }
 
 DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
