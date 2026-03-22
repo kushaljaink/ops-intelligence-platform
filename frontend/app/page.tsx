@@ -482,9 +482,35 @@ export default function Home() {
 
           <div className="flex border-b border-gray-800 px-2 overflow-x-auto">
             {intelTabs.map(tab => (
-              <button key={tab.key} onClick={() => setActiveIntelTab(tab.key)} className={`px-3 py-3 text-xs font-medium border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 ${ activeIntelTab === tab.key ? 'border-indigo-500 text-white' : 'highlight' in tab && tab.highlight ? 'border-transparent text-indigo-400 hover:text-indigo-300 font-semibold' : 'border-transparent text-gray-500 hover:text-gray-300' }`}>
-                {tab.label}
-                {'badge' in tab && tab.badge > 0 && <span className={`text-xs px-1.5 py-0.5 rounded-full text-white ${'badgeColor' in tab ? tab.badgeColor : 'bg-gray-500'}`}>{tab.badge}</span>}
+              <button
+                key={tab.key}
+                onClick={() => setActiveIntelTab(tab.key)}
+                className={`px-3 py-3 text-xs font-medium border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+                  activeIntelTab === tab.key
+                    ? 'border-indigo-500 text-white'
+                    : 'highlight' in tab && (tab as any).highlight
+                    ? 'border-transparent'
+                    : 'border-transparent text-gray-500 hover:text-gray-300'
+                }`}
+              >
+                {'highlight' in tab && (tab as any).highlight ? (
+                  <span className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                    activeIntelTab === tab.key
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-indigo-600 text-white hover:bg-indigo-500'
+                  }`}>
+                    {tab.label}
+                  </span>
+                ) : (
+                  <>
+                    {tab.label}
+                    {'badge' in tab && tab.badge > 0 && (
+                      <span className={`text-xs px-1.5 py-0.5 rounded-full text-white ${'badgeColor' in tab ? tab.badgeColor : 'bg-gray-500'}`}>
+                        {tab.badge}
+                      </span>
+                    )}
+                  </>
+                )}
               </button>
             ))}
           </div>
