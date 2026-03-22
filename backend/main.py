@@ -949,6 +949,33 @@ Extract up to 20 rows. Return ONLY the JSON object."""
     return {"success": True, "filename": filename, "rows_extracted": len(rows_data), "column_mapping": column_mapping, "notes": notes, "detected_issues": issues, "ai_analysis": ai_analysis, "rows": rows_data}
 
 
+class SuggestionPayload(BaseModel):
+    category: str
+    title: str
+    description: Optional[str] = None
+
+@app.post("/suggestions")
+async def submit_suggestion(body: SuggestionPayload):
+    if not body.title.strip():
+        raise HTTPException(status_code=400, detail="Title is required")
+    result = supabase.table("suggestions").insert({
+        "category": body.category,
+        "title": body.title.strip(),
+        "description": body.description.strip() if body.description else None,
+    }).execute()
+    return {"success": True, "id": result.data[0]["id"] if result.data else None}
+
+@app.get("/suggestions")
+def get_suggestions():
+    response = (
+        supabase.table("suggestions")
+        .select("*")
+        .order("submitted_at", desc=True)
+        .execute()
+    )
+    return {"suggestions": response.data}
+
+
 class WebhookEvent(BaseModel):
     stage: str
     queue_size: float

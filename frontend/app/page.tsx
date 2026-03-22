@@ -23,6 +23,13 @@ type WhatIfResult = { stage: string; change_description: string; current: { queu
 type ResolutionEffectiveness = { stage: string; total_incidents: number; resolved: number; open: number; high_severity: number; resolution_rate: number; avg_resolution_minutes: number | null; avg_gap_hours: number | null; is_recurring: boolean; effectiveness: string; most_common_action: string | null; insight: string }
 type Playbook = { stage: string; playbook: string; data_summary: { total_incidents: number; resolution_rate: number; actions_recorded: number; best_actions: string[]; generated_at: string } } | null
 type OutcomeResult = { success: boolean; action_category: string; health_before: number | null; health_after: number | null; improvement: number | null } | null
+type Suggestion = {
+  id: string
+  category: string
+  title: string
+  description: string | null
+  submitted_at: string
+}
 type UploadResult = {
   filename: string
   rows_extracted: number
@@ -118,6 +125,14 @@ export default function Home() {
 
   // Outcome tracking
   const [showAbout, setShowAbout] = useState(false)
+  const [showSuggest, setShowSuggest] = useState(false)
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
+  const [suggestTitle, setSuggestTitle] = useState('')
+  const [suggestCategory, setSuggestCategory] = useState('feature')
+  const [suggestDescription, setSuggestDescription] = useState('')
+  const [suggestSubmitting, setSuggestSubmitting] = useState(false)
+  const [suggestSuccess, setSuggestSuccess] = useState(false)
+  const [suggestError, setSuggestError] = useState<string | null>(null)
   const [showOutcomeId, setShowOutcomeId] = useState<string | null>(null)
   const [outcomeText, setOutcomeText] = useState('')
   const [outcomeMinutes, setOutcomeMinutes] = useState('')
@@ -133,7 +148,7 @@ export default function Home() {
   const [forecast, setForecast] = useState<ForecastSlot[]>([])
   const [effectiveness, setEffectiveness] = useState<ResolutionEffectiveness[]>([])
   const [intelLoading, setIntelLoading] = useState(false)
-  const [activeIntelTab, setActiveIntelTab] = useState<'health' | 'patterns' | 'cascade' | 'anomaly' | 'eta' | 'forecast' | 'whatif' | 'effectiveness' | 'playbook' | 'agent'>('health')
+  const [activeIntelTab, setActiveIntelTab] = useState<'health' | 'patterns' | 'cascade' | 'anomaly' | 'eta' | 'forecast' | 'whatif' | 'effectiveness' | 'playbook' | 'community' | 'agent'>('health')
 
   // What-if
   const [whatIfStage, setWhatIfStage] = useState('')
@@ -221,6 +236,7 @@ export default function Home() {
     fetchData(industryValue)
     fetchIntelligence(industryValue)
     setWhatIfStage(''); setWhatIfResult(null); setPlaybook(null); setPlaybookStage('')
+    fetchSuggestions()
   }, [industryValue])
 
   const analyzeIncident = async (id: string) => {
@@ -377,6 +393,37 @@ export default function Home() {
     })
   }
 
+  const submitSuggestion = async () => {
+    if (!suggestTitle.trim()) return
+    setSuggestSubmitting(true)
+    setSuggestError(null)
+    try {
+      const r = await fetch(`${BACKEND}/suggestions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category: suggestCategory, title: suggestTitle, description: suggestDescription }),
+      })
+      if (!r.ok) throw new Error('Submission failed')
+      setSuggestSuccess(true)
+      setSuggestTitle('')
+      setSuggestDescription('')
+      setSuggestCategory('feature')
+      fetchSuggestions()
+    } catch (e) {
+      setSuggestError('Failed to submit. Please try again.')
+    } finally {
+      setSuggestSubmitting(false)
+    }
+  }
+
+  const fetchSuggestions = async () => {
+    try {
+      const r = await fetch(`${BACKEND}/suggestions`)
+      const d = await r.json()
+      setSuggestions(d.suggestions ?? [])
+    } catch { /* ignore */ }
+  }
+
   const analyzeUpload = async () => {
     if (!uploadFile) return
     setUploadLoading(true)
@@ -450,6 +497,7 @@ export default function Home() {
     { key: 'whatif', label: 'What-If Simulation' },
     { key: 'effectiveness', label: 'Resolution Effectiveness' },
     { key: 'playbook', label: 'Playbook Generator' },
+    { key: 'community', label: '💬 Community' },
     { key: 'agent', label: '🤖 AI Agent', highlight: true },
   ] as const
 
@@ -750,6 +798,88 @@ export default function Home() {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* Community */}
+            {activeIntelTab === 'community' && (
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <p className="text-xs text-gray-500">Ideas and suggestions submitted by people using this platform. Have an idea? Submit it below.</p>
+                  </div>
+                  <a href="https://github.com/kushaljaink/ops-intelligence-platform/issues/new" target="_blank" rel="noreferrer" className="text-xs text-gray-500 hover:text-indigo-400 transition-colors whitespace-nowrap ml-4">Open GitHub Issue →</a>
+                </div>
+
+                {/* Submit form */}
+                <div className="p-4 rounded-xl bg-gray-800 border border-gray-700 mb-6">
+                  <p className="text-xs font-semibold text-white mb-3">Submit an Idea</p>
+                  <div className="space-y-3">
+                    <div className="flex gap-2">
+                      {['feature', 'industry', 'improvement', 'bug'].map(cat => (
+                        <button
+                          key={cat}
+                          onClick={() => setSuggestCategory(cat)}
+                          className={`px-3 py-1 rounded-full text-xs font-medium transition-colors capitalize ${suggestCategory === cat ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-400 hover:text-white'}`}
+                        >
+                          {cat}
+                        </button>
+                      ))}
+                    </div>
+                    <input
+                      value={suggestTitle}
+                      onChange={e => { setSuggestTitle(e.target.value); setSuggestSuccess(false) }}
+                      placeholder="What's your idea? (required)"
+                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+                    />
+                    <textarea
+                      value={suggestDescription}
+                      onChange={e => setSuggestDescription(e.target.value)}
+                      placeholder="More details... (optional)"
+                      rows={2}
+                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 resize-none"
+                    />
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={submitSuggestion}
+                        disabled={suggestSubmitting || !suggestTitle.trim()}
+                        className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition-colors"
+                      >
+                        {suggestSubmitting ? 'Submitting…' : 'Submit Idea'}
+                      </button>
+                      {suggestSuccess && <span className="text-xs text-green-400">✓ Submitted! Thank you.</span>}
+                      {suggestError && <span className="text-xs text-red-400">{suggestError}</span>}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Suggestions list */}
+                <div className="space-y-3">
+                  {suggestions.length === 0 && (
+                    <div className="p-6 rounded-xl bg-gray-800/50 border border-gray-700 text-center">
+                      <p className="text-sm text-gray-500">No suggestions yet. Be the first to submit an idea!</p>
+                    </div>
+                  )}
+                  {suggestions.map(s => (
+                    <div key={s.id} className="p-4 rounded-xl bg-gray-800 border border-gray-700">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${
+                              s.category === 'feature' ? 'bg-indigo-500/20 text-indigo-400' :
+                              s.category === 'industry' ? 'bg-green-500/20 text-green-400' :
+                              s.category === 'improvement' ? 'bg-yellow-500/20 text-yellow-400' :
+                              'bg-red-500/20 text-red-400'
+                            }`}>{s.category}</span>
+                          </div>
+                          <p className="text-sm font-medium text-white">{s.title}</p>
+                          {s.description && <p className="text-xs text-gray-400 mt-1 leading-relaxed">{s.description}</p>}
+                        </div>
+                        <p className="text-xs text-gray-600 shrink-0">{new Date(s.submitted_at).toLocaleDateString()}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
