@@ -517,7 +517,7 @@ export default function Home() {
           <div className="flex items-center gap-3">
             <button
               onClick={() => setShowAbout(true)}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gray-800 border border-gray-700 hover:border-indigo-500/40 text-sm text-gray-400 hover:text-white transition-colors"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 text-sm text-white font-semibold transition-colors shadow-lg shadow-indigo-500/30"
             >
               <span>ℹ</span>
               <span>About</span>
