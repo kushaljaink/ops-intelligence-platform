@@ -52,12 +52,15 @@ type AgentResult = {
 const BACKEND = 'https://ops-intelligence-platform.onrender.com'
 
 const INDUSTRIES = [
-  { value: 'cruise', label: 'Cruise Terminal' },
-  { value: 'healthcare', label: 'Healthcare' },
-  { value: 'banking', label: 'Banking & Finance' },
-  { value: 'ecommerce', label: 'E-commerce & Logistics' },
-  { value: 'airport', label: 'Airport Operations' },
-  { value: 'custom', label: 'Custom...' },
+  { value: 'cruise',        label: 'Cruise Terminal' },
+  { value: 'healthcare',    label: 'Healthcare' },
+  { value: 'banking',       label: 'Banking & Finance' },
+  { value: 'ecommerce',     label: 'E-commerce & Logistics' },
+  { value: 'airport',       label: 'Airport Operations' },
+  { value: 'construction',  label: 'Construction Management' },
+  { value: 'civil',         label: 'Civil Engineering' },
+  { value: 'architecture',  label: 'Architecture & Design' },
+  { value: 'custom',        label: 'Custom...' },
 ]
 
 const INDUSTRY_CONTEXT: Record<string, { scenario: string; what: string; example: WorkflowRow }> = {
@@ -66,6 +69,21 @@ const INDUSTRY_CONTEXT: Record<string, { scenario: string; what: string; example
   banking: { scenario: 'A retail bank processing loan applications during peak season', what: 'Each incident represents a processing stage where backlog or SLA thresholds have been breached.', example: { stage: 'loan_verification', queue_size: '140', processing_time_seconds: '720', throughput: '3' } },
   ecommerce: { scenario: 'A fulfilment warehouse during a high-volume sales event', what: 'Each incident represents a fulfilment stage where pick rates or queue sizes have hit critical levels.', example: { stage: 'warehouse_picking', queue_size: '320', processing_time_seconds: '250', throughput: '30' } },
   airport: { scenario: 'An international airport terminal during morning peak hours', what: 'Each incident represents a passenger processing stage where throughput or wait times have exceeded safe thresholds.', example: { stage: 'security_screening', queue_size: '95', processing_time_seconds: '300', throughput: '14' } },
+  construction: {
+    scenario: 'A construction site managing a multi-phase commercial build',
+    what: 'Each incident represents a site workflow stage where crew queues, task processing times, or daily output rates have breached operational thresholds.',
+    example: { stage: 'material_delivery', queue_size: '8', processing_time_seconds: '320', throughput: '1' },
+  },
+  civil: {
+    scenario: 'A civil engineering project managing road and drainage infrastructure',
+    what: 'Each incident represents a field operation stage where equipment queues, cycle times, or completion rates have exceeded safe limits.',
+    example: { stage: 'earthworks', queue_size: '12', processing_time_seconds: '550', throughput: '1' },
+  },
+  architecture: {
+    scenario: 'An architecture firm managing a pipeline of active design projects',
+    what: 'Each incident represents a project workflow stage where revision backlogs, review times, or approval throughput have hit critical levels.',
+    example: { stage: 'design_review', queue_size: '15', processing_time_seconds: '800', throughput: '0' },
+  },
   custom: { scenario: 'A live operational workflow with active threshold breaches', what: 'Each incident represents a stage where metrics have exceeded normal operating limits.', example: { stage: 'your_stage', queue_size: '75', processing_time_seconds: '350', throughput: '6' } },
 }
 

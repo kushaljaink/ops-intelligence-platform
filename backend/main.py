@@ -28,11 +28,14 @@ ALERT_EMAIL = os.getenv("ALERT_EMAIL", "")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 
 INDUSTRY_THRESHOLDS = {
-    "cruise":     {"queue": 50,  "processing": 300, "throughput": 10},
-    "healthcare": {"queue": 20,  "processing": 120, "throughput": 15},
-    "banking":    {"queue": 100, "processing": 600, "throughput": 5},
-    "ecommerce":  {"queue": 200, "processing": 180, "throughput": 50},
-    "airport":    {"queue": 80,  "processing": 240, "throughput": 20},
+    "cruise":        {"queue": 50,  "processing": 300, "throughput": 10},
+    "healthcare":    {"queue": 20,  "processing": 120, "throughput": 15},
+    "banking":       {"queue": 100, "processing": 600, "throughput": 5},
+    "ecommerce":     {"queue": 200, "processing": 180, "throughput": 50},
+    "airport":       {"queue": 80,  "processing": 240, "throughput": 20},
+    "construction":  {"queue": 5,   "processing": 240, "throughput": 3},
+    "civil":         {"queue": 8,   "processing": 480, "throughput": 2},
+    "architecture":  {"queue": 10,  "processing": 720, "throughput": 1},
 }
 
 DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
