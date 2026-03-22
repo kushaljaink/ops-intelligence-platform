@@ -275,6 +275,11 @@ export default function Home() {
     setWhatIfStage(''); setWhatIfResult(null); setPlaybook(null); setPlaybookStage('')
     fetchSuggestions()
     fetchConnectInfo()
+    // Trigger live data fetch for healthcare, airport, logistics
+    if (['healthcare', 'airport', 'ecommerce'].includes(industryValue)) {
+      fetch(`${BACKEND}/fetch-live-data?industry=${industryValue}`, { method: 'POST' })
+        .catch(() => {})  // Silent - never block the UI
+    }
   }, [industryValue])
 
   const analyzeIncident = async (id: string) => {

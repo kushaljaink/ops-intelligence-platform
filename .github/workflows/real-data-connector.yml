@@ -1,0 +1,36 @@
+name: Real Data Connector
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+jobs:
+  fetch-real-data:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install httpx
+
+      - name: Run healthcare connector
+        run: python real_data_connectors.py --industry healthcare
+        env:
+          WEBHOOK_URL: https://ops-intelligence-platform.onrender.com/webhook/events
+
+      - name: Run airport connector
+        run: python real_data_connectors.py --industry airport
+        env:
+          WEBHOOK_URL: https://ops-intelligence-platform.onrender.com/webhook/events
+
+      - name: Run logistics connector
+        run: python real_data_connectors.py --industry logistics
+        env:
+          WEBHOOK_URL: https://ops-intelligence-platform.onrender.com/webhook/events
