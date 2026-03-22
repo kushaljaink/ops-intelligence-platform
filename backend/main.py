@@ -35,10 +35,10 @@ SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
 
 INDUSTRY_THRESHOLDS = {
     "cruise":        {"queue": 50,  "processing": 300, "throughput": 10},
-    "healthcare":    {"queue": 20,  "processing": 120, "throughput": 15},
+    "healthcare":    {"queue": 20,  "processing": 3600, "throughput": 5},
     "banking":       {"queue": 100, "processing": 600, "throughput": 5},
     "ecommerce":     {"queue": 200, "processing": 180, "throughput": 50},
-    "airport":       {"queue": 80,  "processing": 240, "throughput": 20},
+    "airport":       {"queue": 80,  "processing": 600,  "throughput": 8},
     "construction":  {"queue": 5,   "processing": 240, "throughput": 3},
     "civil":         {"queue": 8,   "processing": 480, "throughput": 2},
     "architecture":  {"queue": 10,  "processing": 720, "throughput": 1},
@@ -1147,14 +1147,14 @@ async def fetch_live_data(industry: str = "all"):
                     p = max(100, count * 12)
                     t = max(5, min(35, 180 / max(1, count)))
                     events += [
-                        {"stage": "checkin",            "queue_size": round(q*0.9, 1), "processing_time_seconds": round(p*0.6, 1), "throughput": round(t*1.2, 1), "industry": "airport", "source": f"OpenSky:{airport['code']}"},
+                        {"stage": "check_in",           "queue_size": round(q*0.9, 1), "processing_time_seconds": round(p*0.6, 1), "throughput": round(t*1.2, 1), "industry": "airport", "source": f"OpenSky:{airport['code']}"},
                         {"stage": "security_screening", "queue_size": round(q*1.1, 1), "processing_time_seconds": round(p*0.8, 1), "throughput": round(t*0.9, 1), "industry": "airport", "source": f"OpenSky:{airport['code']}"},
                         {"stage": "boarding",           "queue_size": round(q*0.7, 1), "processing_time_seconds": round(p*0.5, 1), "throughput": round(t*1.1, 1), "industry": "airport", "source": f"OpenSky:{airport['code']}"},
                     ]
                 except Exception:
                     base = 1.5 if is_peak else 0.7
                     events += [
-                        {"stage": "checkin",            "queue_size": round(65*base*noise(), 1), "processing_time_seconds": round(180*base*noise(), 1), "throughput": round(18/base*noise(), 1), "industry": "airport", "source": "faa_benchmark"},
+                        {"stage": "check_in",           "queue_size": round(65*base*noise(), 1), "processing_time_seconds": round(180*base*noise(), 1), "throughput": round(18/base*noise(), 1), "industry": "airport", "source": "faa_benchmark"},
                         {"stage": "security_screening", "queue_size": round(80*base*noise(), 1), "processing_time_seconds": round(220*base*noise(), 1), "throughput": round(15/base*noise(), 1), "industry": "airport", "source": "faa_benchmark"},
                         {"stage": "boarding",           "queue_size": round(50*base*noise(), 1), "processing_time_seconds": round(150*base*noise(), 1), "throughput": round(20/base*noise(), 1), "industry": "airport", "source": "faa_benchmark"},
                     ]
@@ -1325,7 +1325,8 @@ async def receive_webhook(payload: WebhookPayload):
                 # Update existing incident instead of creating duplicate
                 existing_id = existing.data[0]["id"]
                 supabase.table("incidents").update({
-                    "description": existing.data[0]["description"] + " [Updated: " + ". ".join(violations) + "]"
+                    "description": ". ".join(violations),
+                    "severity": severity,
                 }).eq("id", existing_id).execute()
             else:
                 # Create new incident

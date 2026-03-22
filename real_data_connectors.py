@@ -179,7 +179,7 @@ def fetch_airport(dry_run=False):
             t = max(5, min(35, 180 / max(1, count)))
 
             events += [
-                {"stage": "checkin",            "queue_size": round(q*0.9, 1), "processing_time_seconds": round(p*0.6, 1), "throughput": round(t*1.2, 1), "industry": "airport", "source": f"OpenSky:{airport['code']}"},
+                {"stage": "check_in",            "queue_size": round(q*0.9, 1), "processing_time_seconds": round(p*0.6, 1), "throughput": round(t*1.2, 1), "industry": "airport", "source": f"OpenSky:{airport['code']}"},
                 {"stage": "security_screening", "queue_size": round(q*1.1, 1), "processing_time_seconds": round(p*0.8, 1), "throughput": round(t*0.9, 1), "industry": "airport", "source": f"OpenSky:{airport['code']}"},
                 {"stage": "boarding",           "queue_size": round(q*0.7, 1), "processing_time_seconds": round(p*0.5, 1), "throughput": round(t*1.1, 1), "industry": "airport", "source": f"OpenSky:{airport['code']}"},
             ]
@@ -189,7 +189,7 @@ def fetch_airport(dry_run=False):
             base = 1.5 if is_peak else 0.7
             noise = lambda: random.uniform(0.9, 1.1)
             events += [
-                {"stage": "checkin",            "queue_size": round(65*base*noise(), 1), "processing_time_seconds": round(180*base*noise(), 1), "throughput": round(18/base*noise(), 1), "industry": "airport", "source": f"faa_benchmark:{airport['code']}"},
+                {"stage": "check_in",            "queue_size": round(65*base*noise(), 1), "processing_time_seconds": round(180*base*noise(), 1), "throughput": round(18/base*noise(), 1), "industry": "airport", "source": f"faa_benchmark:{airport['code']}"},
                 {"stage": "security_screening", "queue_size": round(80*base*noise(), 1), "processing_time_seconds": round(220*base*noise(), 1), "throughput": round(15/base*noise(), 1), "industry": "airport", "source": f"faa_benchmark:{airport['code']}"},
                 {"stage": "boarding",           "queue_size": round(50*base*noise(), 1), "processing_time_seconds": round(150*base*noise(), 1), "throughput": round(20/base*noise(), 1), "industry": "airport", "source": f"faa_benchmark:{airport['code']}"},
             ]
