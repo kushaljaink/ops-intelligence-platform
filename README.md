@@ -22,8 +22,8 @@ Anyone can visit the live URL, sign up for free, connect their real operational 
 ## Live Demo
 
 🌐 **Frontend:** https://ops-intelligence-platform.vercel.app
-🔌 **Backend API:** https://ops-intelligence-platform.onrender.com/docs
-📁 **GitHub:** https://github.com/kushaljaink/ops-intelligence-platform
+🔧 **Backend API:** https://ops-intelligence-platform.onrender.com/docs
+💻 **GitHub:** https://github.com/kushaljaink/ops-intelligence-platform
 
 > ⚠️ Backend runs on Render's free tier — spins down after 15 min of inactivity. First request may take 30–50 seconds. Visit `/health` to wake it up before a demo.
 
@@ -321,5 +321,5 @@ Your data appears privately on your dashboard. The platform automatically detect
 Built end-to-end using VS Code + Claude Code + Claude.ai.
 
 🌐 https://ops-intelligence-platform.vercel.app
-📁 https://github.com/kushaljaink/ops-intelligence-platform
-🔌 https://ops-intelligence-platform.onrender.com/docs
+💻 https://github.com/kushaljaink/ops-intelligence-platform
+🔧 https://ops-intelligence-platform.onrender.com/docs
