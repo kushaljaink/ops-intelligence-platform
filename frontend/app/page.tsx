@@ -148,7 +148,7 @@ export default function Home() {
   const [forecast, setForecast] = useState<ForecastSlot[]>([])
   const [effectiveness, setEffectiveness] = useState<ResolutionEffectiveness[]>([])
   const [intelLoading, setIntelLoading] = useState(false)
-  const [activeIntelTab, setActiveIntelTab] = useState<'health' | 'patterns' | 'cascade' | 'anomaly' | 'eta' | 'forecast' | 'whatif' | 'effectiveness' | 'playbook' | 'community' | 'agent'>('health')
+  const [activeIntelTab, setActiveIntelTab] = useState<'health' | 'patterns' | 'cascade' | 'anomaly' | 'eta' | 'forecast' | 'whatif' | 'effectiveness' | 'playbook' | 'community'>('health')
 
   // What-if
   const [whatIfStage, setWhatIfStage] = useState('')
@@ -498,7 +498,6 @@ export default function Home() {
     { key: 'effectiveness', label: 'Resolution Effectiveness' },
     { key: 'playbook', label: 'Playbook Generator' },
     { key: 'community', label: '💬 Community' },
-    { key: 'agent', label: '🤖 AI Agent', highlight: true },
   ] as const
 
   return (
@@ -579,7 +578,7 @@ export default function Home() {
             {intelLoading && <div className="flex items-center gap-2 text-xs text-gray-500"><svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" /></svg>Analyzing…</div>}
           </div>
 
-          <div className="flex border-b border-gray-800 px-2 overflow-x-auto">
+          <div className="flex border-b border-gray-800 px-6 flex-wrap">
             {intelTabs.map(tab => (
               <button
                 key={tab.key}
@@ -883,126 +882,6 @@ export default function Home() {
               </div>
             )}
 
-            {/* AI Agent */}
-            {activeIntelTab === 'agent' && (
-              <div>
-                <div className="mb-6">
-                  <div className="flex items-start gap-3 p-4 rounded-xl bg-indigo-500/10 border border-indigo-500/40 mb-4 shadow-sm shadow-indigo-500/10">
-                    <div className="text-2xl">🤖</div>
-                    <div>
-                      <p className="text-sm font-semibold text-white mb-1">AI Investigation Agent</p>
-                      <p className="text-xs text-gray-400">The agent autonomously investigates your operation using 6 tools — checking health scores, cascade risks, patterns, open incidents, and ETAs. At every consequential step, <strong className="text-indigo-400">you decide</strong> whether it proceeds.</p>
-                    </div>
-                  </div>
-                  <div className="flex gap-3">
-                    <input
-                      value={agentGoal}
-                      onChange={e => setAgentGoal(e.target.value)}
-                      placeholder="Optional: give the agent a specific goal (e.g. 'Focus on security_check stage')"
-                      className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500"
-                    />
-                    <button
-                      onClick={runAgent}
-                      disabled={agentRunning}
-                      className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition-colors whitespace-nowrap shadow-lg shadow-indigo-500/30"
-                    >
-                      {agentRunning ? (
-                        <><svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" /></svg>Investigating…</>
-                      ) : '🤖 Run Investigation'}
-                    </button>
-                  </div>
-                  <p className="text-xs text-gray-600 mt-2">Investigation takes 20-40 seconds. The agent will call multiple tools before surfacing findings.</p>
-                </div>
-
-                {agentRateLimit && <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-300 text-sm mb-4">⏳ Rate limit reached. Wait 60 seconds and try again.</div>}
-                {agentError && <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm mb-4">Error: {agentError}</div>}
-
-                {agentResult && (
-                  <div className="space-y-6">
-                    {/* Investigation steps */}
-                    <div>
-                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
-                        Investigation Steps — {agentResult.steps.length} tool calls made
-                      </p>
-                      <div className="space-y-2">
-                        {agentResult.steps.map((step, i) => (
-                          <div key={i} className="flex gap-3 p-3 rounded-lg bg-gray-800 border border-gray-700">
-                            <div className="text-lg shrink-0">{toolIcon(step.tool)}</div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className="text-xs font-semibold text-indigo-400">Step {step.step}</span>
-                                <span className="text-xs text-gray-300">{toolLabel(step.tool)}</span>
-                                {step.input && step.input !== '{}' && step.input !== '""' && (
-                                  <span className="text-xs text-gray-600">→ {step.input.length > 40 ? step.input.slice(0, 40) + '…' : step.input}</span>
-                                )}
-                              </div>
-                              <p className="text-xs text-gray-400 leading-relaxed line-clamp-3">{step.finding}</p>
-                            </div>
-                            <div className="text-green-400 text-xs shrink-0">✓</div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Agent findings */}
-                    <div className="p-5 rounded-xl bg-gray-800 border border-gray-700">
-                      <p className="text-xs font-semibold text-white uppercase tracking-wider mb-3">🧠 Agent Findings & Recommendations</p>
-                      <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{agentResult.output}</p>
-                      <p className="text-xs text-gray-600 mt-3">Investigated at {new Date(agentResult.investigated_at).toLocaleString()}</p>
-                    </div>
-
-                    {/* Human decision points */}
-                    {agentResult.decision_points.length > 0 && (
-                      <div>
-                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
-                          ⚡ Your Decisions — The agent is waiting for your input
-                        </p>
-                        <div className="space-y-3">
-                          {agentResult.decision_points.map((dp) => {
-                            const response = decisionResponses[dp.id]
-                            const result = decisionResults[dp.id]
-                            const isLoading = decisionLoading === dp.id
-                            return (
-                              <div key={dp.id} className={`p-4 rounded-xl border transition-all ${response === true ? 'bg-green-500/5 border-green-500/20' : response === false ? 'bg-gray-800 border-gray-700 opacity-60' : 'bg-indigo-500/5 border-indigo-500/30'}`}>
-                                <div className="flex items-start justify-between gap-4">
-                                  <div className="flex-1">
-                                    <p className="text-sm text-white mb-1">{dp.question}</p>
-                                    {result && <p className="text-xs text-gray-400 mt-1">→ {result}</p>}
-                                  </div>
-                                  {response === null || response === undefined ? (
-                                    <div className="flex gap-2 shrink-0">
-                                      <button
-                                        onClick={() => handleDecision(dp.id, true)}
-                                        disabled={isLoading}
-                                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-green-600 hover:bg-green-500 disabled:opacity-50 transition-colors"
-                                      >
-                                        {isLoading ? '…' : '✓ Yes'}
-                                      </button>
-                                      <button
-                                        onClick={() => handleDecision(dp.id, false)}
-                                        disabled={isLoading}
-                                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-700 hover:bg-gray-600 disabled:opacity-50 transition-colors"
-                                      >
-                                        Skip
-                                      </button>
-                                    </div>
-                                  ) : (
-                                    <span className={`text-xs px-2 py-1 rounded-full shrink-0 ${response ? 'bg-green-500/20 text-green-400' : 'bg-gray-700 text-gray-500'}`}>
-                                      {response ? 'Approved' : 'Skipped'}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
             {/* Playbook Generator */}
             {activeIntelTab === 'playbook' && (
               <div>
@@ -1030,6 +909,98 @@ export default function Home() {
                       </div>
                     )}
                     <div className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{playbook.playbook}</div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* AI Agent — standalone section below tabs */}
+          <div className="border-t border-gray-800 p-6">
+            <div className="flex flex-col items-center text-center mb-5">
+              <div className="flex items-center gap-3 mb-2">
+                <span className="text-2xl">🤖</span>
+                <h3 className="text-base font-semibold text-white">AI Investigation Agent</h3>
+              </div>
+              <p className="text-xs text-gray-400 max-w-lg">The agent autonomously investigates your operation using 5 tools — health scores, cascade risks, patterns, open incidents, and ETAs. At every consequential step, <span className="text-indigo-400 font-medium">you decide</span> whether it proceeds.</p>
+            </div>
+
+            <div className="flex gap-3 mb-5 max-w-2xl mx-auto">
+              <input
+                value={agentGoal}
+                onChange={e => setAgentGoal(e.target.value)}
+                placeholder="Optional: give the agent a specific goal (e.g. 'Focus on security_check stage')"
+                className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+              />
+              <button
+                onClick={runAgent}
+                disabled={agentRunning}
+                className="flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition-colors whitespace-nowrap shadow-lg shadow-indigo-500/30"
+              >
+                {agentRunning ? (
+                  <><svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" /></svg>Investigating…</>
+                ) : '🔍 Run Investigation'}
+              </button>
+            </div>
+            <p className="text-xs text-gray-600 text-center mb-5">Investigation takes 20–40 seconds. The agent will call multiple tools before surfacing findings.</p>
+
+            {agentRateLimit && <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-300 text-sm mb-4 max-w-2xl mx-auto">⏳ Rate limit reached. Wait 60 seconds and try again.</div>}
+            {agentError && <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm mb-4 max-w-2xl mx-auto">Error: {agentError}</div>}
+
+            {agentResult && (
+              <div className="space-y-4 max-w-3xl mx-auto">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Investigation Steps — {agentResult.steps.length} tool calls made</p>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {agentResult.steps.map((step, i) => (
+                    <div key={i} className="flex gap-3 p-3 rounded-lg bg-gray-800 border border-gray-700">
+                      <div className="text-lg shrink-0">{({'check_health_scores':'🏥','get_open_incidents':'🚨','get_cascade_predictions':'📈','get_eta_to_breach':'⏱','get_recurring_patterns':'🔄'} as Record<string,string>)[step.tool] ?? '🤖'}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs font-semibold text-indigo-400">Step {step.step}</span>
+                          <span className="text-xs text-gray-300">{step.tool.replace(/_/g,' ').replace(/\b\w/g,l=>l.toUpperCase())}</span>
+                          {step.input && <span className="text-xs text-gray-600">→ {step.input}</span>}
+                        </div>
+                        <p className="text-xs text-gray-400 leading-relaxed line-clamp-2">{step.finding}</p>
+                      </div>
+                      <div className="text-green-400 text-xs shrink-0">✓</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="p-5 rounded-xl bg-gray-800 border border-gray-700">
+                  <p className="text-xs font-semibold text-white uppercase tracking-wider mb-3">🧠 Agent Findings & Recommendations</p>
+                  <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{agentResult.output}</p>
+                  <p className="text-xs text-gray-600 mt-3">Investigated at {new Date(agentResult.investigated_at).toLocaleString()}</p>
+                </div>
+
+                {agentResult.decision_points.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">⚡ Your Decisions — The agent is waiting for your input</p>
+                    <div className="space-y-3">
+                      {agentResult.decision_points.map((dp) => {
+                        const response = decisionResponses[dp.id]
+                        const result = decisionResults[dp.id]
+                        const isLoading = decisionLoading === dp.id
+                        return (
+                          <div key={dp.id} className={`p-4 rounded-xl border transition-all ${response === true ? 'bg-green-500/5 border-green-500/20' : response === false ? 'bg-gray-800 border-gray-700 opacity-60' : 'bg-indigo-500/5 border-indigo-500/30'}`}>
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="flex-1">
+                                <p className="text-sm text-white mb-1">{dp.question}</p>
+                                {result && <p className="text-xs text-gray-400 mt-1">✓ {result}</p>}
+                              </div>
+                              {response === null || response === undefined ? (
+                                <div className="flex gap-2 shrink-0">
+                                  <button onClick={() => handleDecision(dp.id, true)} disabled={isLoading} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-green-600 hover:bg-green-500 disabled:opacity-50 transition-colors">{isLoading ? '…' : '✓ Yes'}</button>
+                                  <button onClick={() => handleDecision(dp.id, false)} disabled={isLoading} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-700 hover:bg-gray-600 disabled:opacity-50 transition-colors">Skip</button>
+                                </div>
+                              ) : (
+                                <span className={`text-xs px-2 py-1 rounded-full shrink-0 ${response ? 'bg-green-500/20 text-green-400' : 'bg-gray-700 text-gray-500'}`}>{response ? 'Approved' : 'Skipped'}</span>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
                   </div>
                 )}
               </div>
