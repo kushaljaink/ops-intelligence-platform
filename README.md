@@ -1,218 +1,199 @@
 # Ops Intelligence Platform
 
-AI-powered early warning and decision support system for operations teams.
+**AI-powered workflow monitoring, bottleneck detection, and operational intelligence — across any industry.**
 
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-Vercel-black?style=for-the-badge&logo=vercel)](https://ops-intelligence-platform.vercel.app)
-[![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![Next.js](https://img.shields.io/badge/Next.js-000000?style=for-the-badge&logo=nextdotjs&logoColor=white)](https://nextjs.org)
-[![Supabase](https://img.shields.io/badge/Supabase-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white)](https://supabase.com)
-[![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-ops--intelligence--platform.vercel.app-6366f1?style=for-the-badge)](https://ops-intelligence-platform.vercel.app)
+[![API Docs](https://img.shields.io/badge/API%20Docs-Render-22c55e?style=for-the-badge)](https://ops-intelligence-platform.onrender.com/docs)
+[![GitHub](https://img.shields.io/badge/GitHub-kushaljaink-181717?style=for-the-badge&logo=github)](https://github.com/kushaljaink/ops-intelligence-platform)
 
 ---
 
-| | |
-|---|---|
-| **Live App** | [https://ops-intelligence-platform.vercel.app](https://ops-intelligence-platform.vercel.app) |
-| **API Docs** | [https://ops-intelligence-platform.onrender.com/docs](https://ops-intelligence-platform.onrender.com/docs) |
-| **GitHub** | [https://github.com/kushaljaink/ops-intelligence-platform](https://github.com/kushaljaink/ops-intelligence-platform) |
+## What It Does
+
+Organizations run critical workflows across many systems, teams, and handoffs. When those workflows break, the consequences are real — delays, revenue loss, customer impact, and teams firefighting instead of working proactively.
+
+**Ops Intelligence Platform detects workflow bottlenecks before they become crises.**
+
+Anyone can visit the live URL, select their industry, explore real incident data, and get AI-powered root cause analysis and recommended actions in under 3 seconds — with zero setup.
 
 ---
 
-## The Problem
+## Live Demo
 
-Large-scale operations — cruise embarkation, airport security, healthcare admissions, warehouse fulfilment, bank branch workflows — run across many interconnected systems. Thousands of people move through these systems every day, and keeping them moving smoothly depends on dozens of processes working in sync.
+🌐 **Frontend:** https://ops-intelligence-platform.vercel.app  
+🔌 **Backend API:** https://ops-intelligence-platform.onrender.com/docs  
+📁 **GitHub:** https://github.com/kushaljaink/ops-intelligence-platform
 
-When something breaks, it rarely announces itself. A queue backs up. A processing step slows down. Throughput drops. By the time anyone notices, there is already a delay. And with delay comes customer impact, revenue loss, and employees scrambling to fix something that could have been caught ten minutes earlier.
-
-The core challenge is not that teams lack data. Most operations are surrounded by data. The challenge is that no single system connects the dots fast enough to matter. Dashboards show what has already happened. Alerts fire after thresholds are already crossed. Teams work in separate tools — one for monitoring, one for ticketing, one for communication — and spend more time coordinating than fixing.
-
-The result: operations teams are permanently reactive. They fight fires instead of preventing them.
+> ⚠️ The backend runs on Render's free tier and spins down after 15 min of inactivity. First request may take 30–50 seconds. Visit `/health` first to wake it up.
 
 ---
 
-## How companies handle it today
+## Supported Industries
 
-Most operations platforms fall into one of four categories:
+The platform serves 8 industries out of the box, each with calibrated thresholds, seeded historical data, and industry-appropriate AI analysis:
 
-- **Workflow tools** (ServiceNow, Jira, Monday) — track tasks and tickets after a problem is reported
-- **Dashboards** (Grafana, Datadog, Tableau) — visualise what is happening right now, but require a human to interpret it
-- **Alerting systems** (PagerDuty, OpsGenie) — notify teams when a pre-defined threshold is crossed, but only after the fact
-- **AI copilots** (ChatGPT, Copilot integrations) — answer questions when asked, but don't watch your systems or act proactively
-
-Each of these is useful. None of them does the full job.
-
-What they do not do is automatically detect that something is going wrong across multiple steps of a workflow, explain why it is likely happening, and tell the team what to do about it — all before the problem reaches the customer.
-
-That gap is where this project sits.
-
----
-
-## The Solution
-
-**Ops Intelligence Platform** is an early warning and decision support system for operations teams. It watches workflow signals, detects anomalies, creates incident records, and gives teams an AI-generated diagnosis and recommended action — without anyone having to ask.
-
-The demo use case is **CruiseOps AI**: a simulated cruise terminal where passengers move through a pipeline of stages — baggage drop, security screening, biometric check-in, and boarding. Each stage can develop bottlenecks, failures, or delays. The platform monitors the entire pipeline and surfaces problems the moment they emerge.
-
-This is not a chatbot. It is not just a dashboard. It is not just an alert.
-
-It does four things together:
-
-1. **Detection** — identifies when a workflow stage is behaving abnormally
-2. **Diagnosis** — explains the likely cause using an AI model with full incident context
-3. **Recommendation** — suggests concrete next actions for the operations team
-4. **Follow-up** — records the incident and any workflow events for audit and learning
+| Industry | Key Stages | Critical Thresholds |
+|---|---|---|
+| Cruise Terminal | Baggage Drop → Security → Biometrics | Queue > 50, Processing > 300s |
+| Healthcare | Triage → Bed Allocation → Diagnostics | Queue > 20, Processing > 120s |
+| Banking & Finance | Loan Verification → KYC → Approval | Queue > 100, Processing > 600s |
+| E-commerce & Logistics | Warehouse → Dispatch → Returns | Queue > 200, Processing > 180s |
+| Airport Operations | Check-in → Security → Boarding | Queue > 80, Processing > 240s |
+| Construction Management | Material Delivery → Framing → Inspection | Queue > 5, Processing > 240s |
+| Civil Engineering | Earthworks → Quality Check → Drainage | Queue > 8, Processing > 480s |
+| Architecture & Design | Design Review → Permit → Revision | Queue > 10, Processing > 720s |
 
 ---
 
-## How it works
+## Intelligence Engine — 4 Phases
 
-The platform is built around a simple but powerful loop:
+### Phase 2 — Pattern Intelligence
+- **Stage Health Scores** — 0–100 score per stage based on the last 24hrs of metrics, with improving/degrading/stable trend indicators
+- **Recurring Pattern Detection** — identifies stages that fail repeatedly, pinpoints peak failure hours and days of week from 30 days of data
+- **Cascade Prediction** — detects when Stage A failing causes Stage B to degrade 2hrs later; shows confidence % and fires live alerts when the source stage is currently stressed
+- **Anomaly Scoring** — flags stages running below their 30-day baseline before they hit threshold
 
-**1. Signals are monitored**
-Workflow metrics — queue sizes, processing times, throughput rates — are tracked across each stage of the operation. In the demo, this covers the full cruise embarkation pipeline from arrival to boarding.
+### Phase 3 — Predictive Intelligence
+- **ETA to Breach** — linear regression on health score trajectory; projects hours until each stage hits critical threshold (40/100)
+- **7-Day Capacity Forecast** — maps 30-day historical breach patterns to the next 7 days; warns about high-risk time windows before they happen
+- **What-If Simulation** — simulates operational changes (add staff, reduce queue, upgrade equipment, extend hours) and shows projected before/after metrics with AI assessment
 
-**2. A rules engine detects bottlenecks**
-When a metric crosses a defined threshold, the system creates an incident record automatically. No human needs to spot it first. Each incident captures the affected stage, severity level, current status, and a plain-language description of what was detected.
+### Phase 4 — Recommendation Intelligence
+- **Confidence Scoring** — every AI analysis shows a 0–100% confidence score extracted from the language Groq uses, with a confidence bar and label
+- **Outcome Tracking** — after resolving an incident, logs what action was taken, categorizes it (staffing/equipment/process/escalation), and records health score before and after
+- **Resolution Effectiveness** — tracks per-stage resolution rates, recurrence gaps, and avg time to resolve; flags stages where fixes aren't holding
+- **Playbook Generator** — generates a full SOP (trigger conditions, immediate actions, escalation, root cause checklist, prevention) grounded in actual past incident data
 
-**3. AI diagnoses the incident**
-When an operator clicks "Analyze with AI", the incident details are sent to a locally-hosted LLM (llama3.2 via Ollama). The model reads the full incident context — stage, severity, description, service — and returns a structured analysis: what likely caused this, and what the team should do next.
+### Phase 5 — Human-in-the-Loop AI Agent
+A LangChain-style agent built on Groq's native tool-calling API. The agent autonomously investigates the operation using 5 tools, then surfaces every consequential decision to the user before acting.
 
-**4. The dashboard surfaces everything in one place**
-Active incidents are shown with severity badges, status, detection time, and one-click AI analysis. There is no need to jump between tools. The on-call engineer sees the problem, the context, and the recommended action on a single screen.
+**Agent tools:**
+- `check_health_scores` — gets current 0–100 score per stage
+- `get_open_incidents` — fetches all active incidents with IDs
+- `get_cascade_predictions` — checks for active cascade risks
+- `get_eta_to_breach` — calculates urgency of declining stages
+- `get_recurring_patterns` — pulls 30-day pattern data for a specific stage
 
----
+**Human-in-the-loop decisions surfaced after every investigation:**
+- Acknowledge critical issues → user approves or skips
+- Generate playbooks for recurring stages → user approves or skips
+- Send cascade alert → user approves or skips
+- Log investigation to audit trail → user approves or skips
 
-## Why this is different
-
-Here is the typical operations workflow today:
-
-> Monitor dashboards → someone spots something wrong → investigate across multiple tools → message the right team → wait for them to assess → decide what to do
-
-Every step in that chain takes time. Each handoff introduces delay. By the time the team is aligned on what to do, the problem has already cascaded.
-
-Here is how this platform changes that:
-
-> System detects abnormal behavior → incident record created automatically → AI pulls together the context → diagnosis and recommended action delivered in seconds → team acts immediately
-
-The difference is not just speed. It is the removal of the ambiguous middle steps where things fall through the cracks: the analyst who did not notice the graph drift, the alert that went to the wrong channel, the on-call engineer who spent twenty minutes investigating before finding the right data.
-
-This platform reduces time-to-notice, time-to-triage, and time-to-coordinate — the three biggest contributors to operational downtime.
-
----
-
-## Tech stack
-
-| Layer | Technology |
-|---|---|
-| Backend API | FastAPI (Python) |
-| Frontend | Next.js 14 (App Router, TypeScript) |
-| Database | Supabase (PostgreSQL) |
-| Vector search | pgvector |
-| AI inference | Ollama · llama3.2 |
-| Frontend hosting | Vercel |
-| Backend hosting | Render |
+The agent never acts without user approval.
 
 ---
 
-## Note on free tier hosting
+## Tech Stack
 
-This project runs entirely on free-tier infrastructure — here is what to expect:
-
-- **Vercel (frontend)** — Always on. Loads instantly.
-- **Render (backend)** — Spins down after inactivity. The first request after a cold start takes **30–50 seconds** to respond; subsequent requests are fast.
-- **Supabase (database)** — Stays active as long as the project is accessed occasionally. No cold start.
-
-> **Tip for reviewers:** Before sharing or demoing, visit [https://ops-intelligence-platform.onrender.com/health](https://ops-intelligence-platform.onrender.com/health) to wake the backend up. Once it returns `{"status":"ok"}`, the app is fully live.
-
----
-
-## Screenshots
-
-> _Screenshots coming soon._
+| Layer | Technology | Notes |
+|---|---|---|
+| Frontend | Next.js 16 + TypeScript + Tailwind | Deployed on Vercel, auto-deploys on push |
+| Backend API | FastAPI (Python) | Deployed on Render free tier |
+| Database | Supabase (PostgreSQL) | 5 tables: incidents, workflow_metrics, analysis_logs, incident_outcomes, recommendations |
+| AI — Production | Groq (llama-3.3-70b-versatile) | Free tier, 2–3 second response times |
+| AI — Local Dev | Ollama + llama3.2 | Still works locally for development |
+| Agent | Groq native tool-calling | No LangChain — direct function calling via OpenAI-compatible API |
+| Frontend Hosting | Vercel | Always on, auto-deploy |
+| Backend Hosting | Render | Free tier, spins down after 15 min |
+| Version Control | GitHub | Public repo |
 
 ---
 
-## How to run locally
+## API Endpoints
 
-### Prerequisites
+### Core
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/health` | Health check |
+| GET | `/incidents?industry=cruise` | Get incidents filtered by industry |
+| GET | `/incidents/stats?industry=cruise` | Stats with trend vs yesterday |
+| PATCH | `/incidents/{id}/resolve` | Mark incident resolved |
+| POST | `/analyze-incident/{id}` | AI analysis with confidence score |
+| POST | `/incidents/{id}/outcome` | Log what action was taken post-resolution |
 
-- Python 3.11+
-- Node.js 18+
-- [Ollama](https://ollama.com) installed and running
-- A Supabase project with `incidents`, `recommendations`, and `workflow_events` tables
+### Intelligence Engine
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/intelligence/health-scores?industry=cruise` | Stage health scores + trend |
+| GET | `/intelligence/recurring-patterns?industry=cruise` | 30-day breach pattern analysis |
+| GET | `/intelligence/cascade-predictions?industry=cruise` | Active cascade risks |
+| GET | `/intelligence/anomaly-scores?industry=cruise` | Anomaly vs 30-day baseline |
+| GET | `/intelligence/eta-to-breach?industry=cruise` | Hours to critical threshold |
+| GET | `/intelligence/capacity-forecast?industry=cruise` | 7-day risk forecast |
+| GET | `/intelligence/whatif-simulation?stage=security_check&change=add_staff&magnitude=2` | Simulate operational changes |
+| GET | `/intelligence/resolution-effectiveness?industry=cruise` | Per-stage resolution analytics |
+| GET | `/intelligence/playbook/{stage}?industry=cruise` | Generate AI-powered SOP |
 
-### 1. Clone the repo
+### Agent
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/agent/investigate` | Run AI agent investigation |
+| POST | `/agent/decision` | Submit human decision on agent finding |
+
+### Data Ingestion
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/webhook/events` | Ingest live operational data from external systems |
+| POST | `/analyze-custom` | Analyze custom workflow data entered by user |
+
+---
+
+## Database Schema
+
+```sql
+incidents          -- Active incidents per industry and stage
+workflow_metrics   -- Raw time-series metrics (health scores, queue, processing, throughput)
+analysis_logs      -- AI analysis history with confidence scores
+incident_outcomes  -- Logged resolution actions and health before/after
+recommendations    -- Static recommendations per incident
+```
+
+---
+
+## Local Development
+
+**Prerequisites:** Python 3.11+, Node.js 20+, Supabase account, Groq API key (free at console.groq.com)
 
 ```bash
-git clone https://github.com/kushaljaink/ops-intelligence-platform.git
+# Clone
+git clone https://github.com/kushaljaink/ops-intelligence-platform
 cd ops-intelligence-platform
-```
 
-### 2. Backend
-
-```bash
+# Backend
 cd backend
+python -m venv venv
+venv\Scripts\activate          # Windows
 pip install -r requirements.txt
-```
-
-Create a `.env` file in `backend/`:
-
-```env
-SUPABASE_URL=your_supabase_url
-SUPABASE_KEY=your_supabase_anon_key
-```
-
-Start the API:
-
-```bash
+cp .env.example .env           # Add SUPABASE_URL, SUPABASE_KEY, GROQ_API_KEY
 uvicorn main:app --reload
-```
 
-The backend will be available at `http://localhost:8000`.
-
-### 3. Pull the AI model
-
-```bash
-ollama pull llama3.2
-```
-
-Make sure Ollama is running (`ollama serve`) before using the Analyze feature.
-
-### 4. Frontend
-
-```bash
+# Frontend (new terminal)
 cd frontend
 npm install
 npm run dev
 ```
 
-The app will be available at `http://localhost:3000`.
-
-> **Note:** By default the frontend points to the production backend on Render. To use your local backend, update the fetch URLs in `frontend/app/page.tsx` to `http://localhost:8000`.
+Open http://localhost:3000
 
 ---
 
-## Resume bullet points
+## Maintenance (Free Tier)
 
-- Built a full-stack AI operations platform using **FastAPI**, **Next.js**, and **Supabase**, deployed on **Vercel** and **Render**
-- Integrated **Ollama (llama3.2)** to generate real-time root cause analysis and remediation recommendations for production incidents
-- Designed a **pgvector**-backed Supabase schema for incident storage and semantic search across operational events
-- Implemented a responsive dark-theme dashboard surfacing live incident severity, status, and AI analysis with zero page reloads
+**Weekly (2 minutes):**
+- Visit Supabase dashboard to keep project active (pauses after 7 days of inactivity)
+- Visit `/health` endpoint to wake Render backend
+
+**Before sharing with a recruiter:**
+1. Visit `https://ops-intelligence-platform.onrender.com/health` — wait for `{"status":"ok"}`
+2. Visit the live Vercel URL — confirm incidents load
+3. Click **Analyze with AI** on one incident — confirm Groq responds
+4. Run an **AI Agent Investigation** — confirm 5 tool calls complete
+5. Then share the links
 
 ---
 
-## Maintenance Notes
+## Built By
 
-### Weekly checklist (2 minutes)
-- Visit [supabase.com](https://supabase.com) and open the project dashboard to keep the free tier active (pauses after 7 days of inactivity)
-- Visit [https://ops-intelligence-platform.onrender.com/health](https://ops-intelligence-platform.onrender.com/health) to wake up the backend
-
-### Before sharing with a recruiter (30 seconds)
-1. Visit [https://ops-intelligence-platform.onrender.com/health](https://ops-intelligence-platform.onrender.com/health) and wait for `{"status":"ok"}`
-2. Visit [https://ops-intelligence-platform.vercel.app](https://ops-intelligence-platform.vercel.app) and confirm incidents load
-3. Then share the links
-
-### What stays on automatically
-- **Vercel frontend** — always on, no action needed
-- **Supabase database** — stays active with weekly login
-- **Render backend** — spins down after 15 min inactivity, wakes up on first request (30–50 sec delay)
+**Kushal Jain** — March 2026  
+Built end-to-end in a series of focused sessions using VS Code + Claude Code + Claude.ai
