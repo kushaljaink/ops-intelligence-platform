@@ -1,22 +1,12 @@
-"""
-ops_agent.py — Human-in-the-Loop AI Agent for Ops Intelligence Platform
-
-Architecture:
-- LangChain agent with Groq (llama-3.3-70b) as the reasoning engine
-- 6 tools the agent can call to investigate operational state
-- Human-in-the-loop: agent pauses at every consequential action
-- Investigation steps are streamed back to the frontend in real time
-"""
-
 from langchain_groq import ChatGroq
-from langchain_core.tools import tool
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.tools import StructuredTool
 from langchain.agents import AgentExecutor, create_tool_calling_agent
+from pydantic import BaseModel, Field
 from supabase import Client
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
-import os
+from typing import Optional
 import httpx
 
 INDUSTRY_THRESHOLDS = {
@@ -27,23 +17,29 @@ INDUSTRY_THRESHOLDS = {
     "airport":    {"queue": 80,  "processing": 240, "throughput": 20},
 }
 
+DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+
+
+class EmptyInput(BaseModel):
+    dummy: Optional[str] = Field(default="", description="No input needed")
+
+class StageInput(BaseModel):
+    stage_name: str = Field(description="The name of the stage to analyze, e.g. security_check")
+
+class IncidentInput(BaseModel):
+    incident_id: str = Field(description="The full UUID of the incident to analyze")
+
 
 def build_agent_tools(supabase: Client, groq_api_key: str, industry: str):
-    """
-    Build the agent's toolset bound to a specific industry and supabase instance.
-    Tools are plain functions decorated with @tool — the agent decides when to call them.
-    """
 
-    @tool
     def check_health_scores(dummy: str = "") -> str:
-        """Check current health scores for all stages in the operation. Returns health score, trend, and status for each stage."""
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
         response = supabase.table("workflow_metrics").select("stage, health_score, recorded_at").eq("industry", industry).gte("recorded_at", cutoff).order("recorded_at", desc=True).execute()
         stage_readings: dict = defaultdict(list)
         for row in response.data:
             stage_readings[row["stage"]].append(row["health_score"])
         if not stage_readings:
-            return "No health data available for this industry."
+            return "No health data available."
         results = []
         for stage, scores in stage_readings.items():
             recent = scores[:3]
@@ -56,15 +52,19 @@ def build_agent_tools(supabase: Client, groq_api_key: str, industry: str):
             results.append(f"- {stage}: health={current}, trend={trend}, status={status}")
         return "Current health scores:\n" + "\n".join(results)
 
-    @tool
+    def get_open_incidents(dummy: str = "") -> str:
+        response = supabase.table("incidents").select("id, stage, severity, description, created_at").eq("industry", industry).eq("status", "open").order("created_at", desc=True).execute()
+        if not response.data:
+            return "No open incidents."
+        results = [f"- [{i['severity'].upper()}] {i['stage']}: {i['description']} (id: {i['id'][:8]}...)" for i in response.data]
+        return f"Open incidents ({len(response.data)}):\n" + "\n".join(results)
+
     def get_cascade_predictions(dummy: str = "") -> str:
-        """Check for cascade relationships between stages. Returns any active cascade risks where one stage failing causes another to degrade."""
         cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
         thresholds = INDUSTRY_THRESHOLDS.get(industry, {"queue": 50, "processing": 300, "throughput": 10})
         response = supabase.table("workflow_metrics").select("stage, queue_size, processing_time_seconds, throughput, health_score, recorded_at").eq("industry", industry).gte("recorded_at", cutoff).order("recorded_at").execute()
         stage_buckets: dict = defaultdict(dict)
         for row in response.data:
-            from datetime import datetime
             ts = datetime.fromisoformat(row["recorded_at"].replace("Z", "+00:00"))
             bucket_key = ts.replace(minute=0, second=0, microsecond=0).isoformat()
             breached = row["queue_size"] > thresholds["queue"] or row["processing_time_seconds"] > thresholds["processing"] or row["throughput"] < thresholds["throughput"]
@@ -96,27 +96,22 @@ def build_agent_tools(supabase: Client, groq_api_key: str, industry: str):
                 recent_source = sorted(source_data.keys())[-3:]
                 currently_stressed = any(source_data[k]["breached"] for k in recent_source)
                 if currently_stressed and confidence >= 60:
-                    active_risks.append(f"ACTIVE RISK: {source} → {target} ({confidence}% confidence, 2hr lag)")
-        if not active_risks:
-            return "No active cascade risks detected."
-        return "Active cascade risks:\n" + "\n".join(active_risks)
+                    active_risks.append(f"ACTIVE RISK: {source} -> {target} ({confidence}% confidence, 2hr lag)")
+        return "Active cascade risks:\n" + "\n".join(active_risks) if active_risks else "No active cascade risks."
 
-    @tool
     def get_recurring_patterns(stage_name: str) -> str:
-        """Get recurring failure patterns for a specific stage. Input: stage name (e.g. 'security_check'). Returns how often it fails, peak times, and peak days."""
         cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
         thresholds = INDUSTRY_THRESHOLDS.get(industry, {"queue": 50, "processing": 300, "throughput": 10})
-        response = supabase.table("workflow_metrics").select("queue_size, processing_time_seconds, throughput, health_score, recorded_at").eq("industry", industry).eq("stage", stage_name).gte("recorded_at", cutoff).execute()
+        response = supabase.table("workflow_metrics").select("queue_size, processing_time_seconds, throughput, recorded_at").eq("industry", industry).eq("stage", stage_name).gte("recorded_at", cutoff).execute()
         if not response.data:
-            return f"No data found for stage '{stage_name}'."
+            return f"No data for stage '{stage_name}'."
         breaches = []
-        DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
         for row in response.data:
             if row["queue_size"] > thresholds["queue"] or row["processing_time_seconds"] > thresholds["processing"] or row["throughput"] < thresholds["throughput"]:
                 ts = datetime.fromisoformat(row["recorded_at"].replace("Z", "+00:00"))
                 breaches.append({"hour": ts.hour, "dow": int(ts.strftime("%w"))})
         if not breaches:
-            return f"Stage '{stage_name}' has no threshold breaches in the last 30 days."
+            return f"Stage '{stage_name}' has no threshold breaches in 30 days."
         hour_counts: dict = defaultdict(int)
         dow_counts: dict = defaultdict(int)
         for b in breaches:
@@ -127,17 +122,12 @@ def build_agent_tools(supabase: Client, groq_api_key: str, industry: str):
         hour_label = f"{'12' if peak_hour == 12 else peak_hour % 12 or 12}{'am' if peak_hour < 12 else 'pm'}"
         peak_hour_pct = round(hour_counts[peak_hour] / len(breaches) * 100)
         peak_dow_pct = round(dow_counts[peak_dow] / len(breaches) * 100)
-        return (
-            f"Stage '{stage_name}' patterns:\n"
-            f"- Total breaches in 30 days: {len(breaches)}\n"
-            f"- Peak time: {hour_label} ({peak_hour_pct}% of failures)\n"
-            f"- Peak day: {DAY_NAMES[peak_dow]}s ({peak_dow_pct}% of failures)\n"
-            f"- Severity: {'high' if len(breaches) > 20 else 'medium' if len(breaches) > 10 else 'low'}"
-        )
+        return (f"Stage '{stage_name}': {len(breaches)} breaches in 30 days. "
+                f"Peak time: {hour_label} ({peak_hour_pct}%). "
+                f"Peak day: {DAY_NAMES[peak_dow]}s ({peak_dow_pct}%). "
+                f"Severity: {'high' if len(breaches) > 20 else 'medium' if len(breaches) > 10 else 'low'}")
 
-    @tool
     def get_eta_to_breach(dummy: str = "") -> str:
-        """Calculate ETA to breach for all declining stages based on health score trajectory. Returns urgency and estimated hours to critical threshold."""
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat()
         thresholds = INDUSTRY_THRESHOLDS.get(industry, {"queue": 50, "processing": 300, "throughput": 10})
         response = supabase.table("workflow_metrics").select("stage, health_score, queue_size, processing_time_seconds, throughput, recorded_at").eq("industry", industry).gte("recorded_at", cutoff).order("recorded_at", desc=True).execute()
@@ -163,168 +153,81 @@ def build_agent_tools(supabase: Client, groq_api_key: str, industry: str):
             if already_breached:
                 results.append(f"- {stage}: ALREADY BREACHED — immediate action required")
             elif health_change_per_hour < 0 and current_health < 85:
-                hours_to_critical = (current_health - 40) / abs(health_change_per_hour)
-                eta = round(hours_to_critical, 1)
-                urgency = "CRITICAL" if eta <= 2 else "WARNING" if eta <= 6 else "MONITOR"
-                results.append(f"- {stage}: {urgency} — breach in ~{eta}hrs (current health: {current_health})")
-        if not results:
-            return "All stages are stable or improving. No breach predicted."
-        return "ETA to breach:\n" + "\n".join(results)
+                hours = round((current_health - 40) / abs(health_change_per_hour), 1)
+                urgency = "CRITICAL" if hours <= 2 else "WARNING" if hours <= 6 else "MONITOR"
+                results.append(f"- {stage}: {urgency} — breach in ~{hours}hrs (health: {current_health})")
+        return "ETA to breach:\n" + "\n".join(results) if results else "All stages stable. No breach predicted."
 
-    @tool
-    def get_open_incidents(dummy: str = "") -> str:
-        """Get all currently open incidents for this industry. Returns stage, severity, and description of each open incident."""
-        response = supabase.table("incidents").select("id, stage, severity, description, created_at").eq("industry", industry).eq("status", "open").order("created_at", desc=True).execute()
-        if not response.data:
-            return "No open incidents."
-        results = []
-        for inc in response.data:
-            results.append(f"- [{inc['severity'].upper()}] {inc['stage']}: {inc['description']} (id: {inc['id'][:8]}...)")
-        return f"Open incidents ({len(response.data)}):\n" + "\n".join(results)
-
-    @tool
     def analyze_specific_incident(incident_id: str) -> str:
-        """Run AI analysis on a specific incident by its ID. Input: full incident UUID. Returns root cause and recommendations."""
         result = supabase.table("incidents").select("*").eq("id", incident_id).single().execute()
         if not result.data:
             return f"Incident {incident_id} not found."
         incident = result.data
-        prompt = (
-            f"Senior ops analyst. {industry} operation.\n"
-            f"Stage: {incident.get('stage')} | Severity: {incident.get('severity')}\n"
-            f"Description: {incident.get('description')}\n"
-            "Give: 1) Root cause 2) Downstream impact 3) 3 immediate actions. Be specific."
-        )
-        import httpx
-        response = httpx.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {groq_api_key}"},
-            json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "max_tokens": 400},
-            timeout=30.0,
-        )
-        if response.status_code != 200:
-            return f"Analysis failed: HTTP {response.status_code}"
-        analysis = response.json()["choices"][0]["message"]["content"]
-        supabase.table("analysis_logs").insert({"incident_id": incident_id, "ai_analysis": analysis, "triggered_by": "agent"}).execute()
-        return f"Analysis for {incident.get('stage')}:\n{analysis}"
+        prompt = (f"Senior ops analyst. {industry}.\nStage: {incident.get('stage')} | Severity: {incident.get('severity')}\n"
+                  f"Description: {incident.get('description')}\n1. Root cause 2. Downstream impact 3. 3 immediate actions.")
+        try:
+            response = httpx.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {groq_api_key}"},
+                json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "max_tokens": 400},
+                timeout=30.0,
+            )
+            analysis = response.json()["choices"][0]["message"]["content"]
+            supabase.table("analysis_logs").insert({"incident_id": incident_id, "ai_analysis": analysis, "triggered_by": "agent"}).execute()
+            return f"Analysis for {incident.get('stage')}:\n{analysis}"
+        except Exception as e:
+            return f"Analysis failed: {str(e)}"
 
     return [
-        check_health_scores,
-        get_cascade_predictions,
-        get_recurring_patterns,
-        get_eta_to_breach,
-        get_open_incidents,
-        analyze_specific_incident,
+        StructuredTool(name="check_health_scores", description="Check current health scores for all stages. Call this first.", func=check_health_scores, args_schema=EmptyInput),
+        StructuredTool(name="get_open_incidents", description="Get all currently open incidents.", func=get_open_incidents, args_schema=EmptyInput),
+        StructuredTool(name="get_cascade_predictions", description="Check for active cascade risks between stages.", func=get_cascade_predictions, args_schema=EmptyInput),
+        StructuredTool(name="get_eta_to_breach", description="Get ETA to breach for all declining stages.", func=get_eta_to_breach, args_schema=EmptyInput),
+        StructuredTool(name="get_recurring_patterns", description="Get recurring failure patterns for a specific stage.", func=get_recurring_patterns, args_schema=StageInput),
+        StructuredTool(name="analyze_specific_incident", description="Run AI analysis on a specific incident by its ID.", func=analyze_specific_incident, args_schema=IncidentInput),
     ]
 
 
 def build_agent(supabase: Client, groq_api_key: str, industry: str) -> AgentExecutor:
-    llm = ChatGroq(
-        model="llama-3.3-70b-versatile",
-        api_key=groq_api_key,
-        temperature=0,
-        max_tokens=1000,
-    )
+    llm = ChatGroq(model="llama-3.3-70b-versatile", api_key=groq_api_key, temperature=0, max_tokens=1000)
     tools = build_agent_tools(supabase, groq_api_key, industry)
-
     prompt = ChatPromptTemplate.from_messages([
         ("system", f"""You are an AI operations intelligence agent investigating a {industry} operation.
-Check health scores first, then cascade risks and open incidents.
-For any critical or severe stage, check its recurring patterns and ETA to breach.
-Prioritize findings by urgency. End with a structured action list for the ops team.
-Use actual numbers and stage names. Be specific."""),
+Always start by calling check_health_scores, then get_open_incidents, then get_cascade_predictions.
+For any critical or severe stage, call get_recurring_patterns with that stage name.
+Then call get_eta_to_breach to see how urgent things are.
+End with a structured report: CRITICAL ISSUES, WARNING ISSUES, RECOMMENDED ACTIONS."""),
         ("human", "{input}"),
         MessagesPlaceholder(variable_name="agent_scratchpad"),
     ])
-
     agent = create_tool_calling_agent(llm, tools, prompt)
-    return AgentExecutor(
-        agent=agent,
-        tools=tools,
-        verbose=True,
-        max_iterations=8,
-        return_intermediate_steps=True,
-        handle_parsing_errors=True,
-    )
+    return AgentExecutor(agent=agent, tools=tools, verbose=True, max_iterations=10, return_intermediate_steps=True, handle_parsing_errors=True)
 
 
 def run_investigation(supabase: Client, groq_api_key: str, industry: str, custom_goal: str = "") -> dict:
-    """
-    Run a full agent investigation and return structured results.
-    Returns: steps taken, findings, and recommended human decisions.
-    """
     agent_executor = build_agent(supabase, groq_api_key, industry)
-
-    goal = custom_goal or f"Investigate the current operational state of the {industry} operation. Identify the most critical issues, check for cascade risks and patterns, and provide a prioritized action plan for the ops team."
-
+    goal = custom_goal or f"Investigate the current operational state of the {industry} operation and provide a prioritized action plan."
     try:
         result = agent_executor.invoke({"input": goal})
         output = result.get("output", "")
         steps = result.get("intermediate_steps", [])
-
-        # Parse steps into readable format
         parsed_steps = []
         for i, (action, observation) in enumerate(steps):
             parsed_steps.append({
                 "step": i + 1,
                 "tool": action.tool,
-                "input": action.tool_input if isinstance(action.tool_input, str) else str(action.tool_input),
+                "input": str(action.tool_input) if action.tool_input else "",
                 "finding": str(observation)[:500],
             })
-
-        # Extract human decision points from the output
-        decision_points = []
-
-        # Look for critical/severe issues mentioned in output
         output_lower = output.lower()
+        decision_points = []
         if "critical" in output_lower or "severe" in output_lower or "breached" in output_lower:
-            decision_points.append({
-                "id": "acknowledge_critical",
-                "type": "acknowledge",
-                "question": "The agent found critical issues. Do you want to mark these incidents as acknowledged and trigger alerts?",
-                "action": "trigger_alerts",
-            })
-
-        if "playbook" in output_lower or "recurring" in output_lower or "pattern" in output_lower:
-            # Extract stage names mentioned near "playbook" or "recurring"
-            decision_points.append({
-                "id": "generate_playbook",
-                "type": "playbook",
-                "question": "The agent identified recurring failure patterns. Do you want to auto-generate playbooks for the affected stages?",
-                "action": "generate_playbooks",
-            })
-
+            decision_points.append({"id": "acknowledge_critical", "type": "acknowledge", "question": "The agent found critical issues. Do you want to acknowledge these and flag them for the ops team?", "action": "trigger_alerts"})
+        if "recurring" in output_lower or "pattern" in output_lower or "playbook" in output_lower:
+            decision_points.append({"id": "generate_playbook", "type": "playbook", "question": "Recurring failure patterns were detected. Do you want to auto-generate playbooks for affected stages?", "action": "generate_playbooks"})
         if "cascade" in output_lower:
-            decision_points.append({
-                "id": "cascade_alert",
-                "type": "alert",
-                "question": "A cascade risk was detected. Do you want to send an alert to the ops team?",
-                "action": "send_cascade_alert",
-            })
-
-        decision_points.append({
-            "id": "log_investigation",
-            "type": "audit",
-            "question": "Log this investigation to the audit trail?",
-            "action": "log_audit",
-        })
-
-        return {
-            "success": True,
-            "industry": industry,
-            "goal": goal,
-            "steps": parsed_steps,
-            "output": output,
-            "decision_points": decision_points,
-            "investigated_at": datetime.now(timezone.utc).isoformat(),
-        }
-
+            decision_points.append({"id": "cascade_alert", "type": "alert", "question": "A cascade risk was detected. Do you want to note this for the ops team?", "action": "send_cascade_alert"})
+        decision_points.append({"id": "log_investigation", "type": "audit", "question": "Log this investigation to the audit trail?", "action": "log_audit"})
+        return {"success": True, "industry": industry, "goal": goal, "steps": parsed_steps, "output": output, "decision_points": decision_points, "investigated_at": datetime.now(timezone.utc).isoformat()}
     except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-            "industry": industry,
-            "steps": [],
-            "output": "",
-            "decision_points": [],
-        }
+        return {"success": False, "error": str(e), "industry": industry, "steps": [], "output": "", "decision_points": []}
