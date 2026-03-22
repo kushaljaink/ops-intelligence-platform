@@ -1708,15 +1708,31 @@ export default function Home() {
             <button onClick={() => setShowAbout(false)} className="text-gray-500 hover:text-white transition-colors text-2xl leading-none">×</button>
           </div>
           <div className="flex-1 overflow-y-auto p-6 space-y-8">
+            {/* What it does */}
             <section>
               <h3 className="text-sm font-semibold text-indigo-400 uppercase tracking-wider mb-3">What It Does</h3>
-              <p className="text-sm text-gray-300 leading-relaxed mb-3">A platform that watches operational workflows, detects when something is going wrong, figures out why, predicts what breaks next, and tells humans exactly what to do — <span className="text-white font-medium">before the situation becomes a crisis.</span></p>
-              <p className="text-sm text-gray-400 leading-relaxed">Anyone can visit the live URL, select their industry, explore real incident data, and get AI-powered root cause analysis and recommended actions in under 3 seconds — with zero setup.</p>
+              <p className="text-sm text-gray-300 leading-relaxed mb-3">
+                A platform that watches operational workflows, detects when something is going wrong, figures out why, predicts what breaks next, and tells humans exactly what to do — <span className="text-white font-medium">before the situation becomes a crisis.</span>
+              </p>
+              <p className="text-sm text-gray-400 leading-relaxed">
+                Sign up for free, connect your real operational data via webhook, and get AI-powered root cause analysis, cascade predictions, breach forecasts, and autonomous agent investigations — all with human approval at every step.
+              </p>
             </section>
+
+            {/* Industries */}
             <section>
               <h3 className="text-sm font-semibold text-indigo-400 uppercase tracking-wider mb-3">8 Industries Supported</h3>
               <div className="grid grid-cols-2 gap-2">
-                {[{name:'Cruise Terminal',stages:'Baggage Drop → Security → Biometrics'},{name:'Healthcare',stages:'Triage → Bed Allocation → Diagnostics'},{name:'Banking & Finance',stages:'Loan Verification → KYC → Approval'},{name:'E-commerce & Logistics',stages:'Warehouse → Dispatch → Returns'},{name:'Airport Operations',stages:'Check-in → Security → Boarding'},{name:'Construction Management',stages:'Material Delivery → Framing → Inspection'},{name:'Civil Engineering',stages:'Earthworks → Quality Check → Drainage'},{name:'Architecture & Design',stages:'Design Review → Permit → Revision'}].map(ind => (
+                {[
+                  { name: 'Cruise Terminal', stages: 'Baggage Drop → Security → Biometrics' },
+                  { name: 'Healthcare', stages: 'ED Triage → Bed Allocation → Diagnostics' },
+                  { name: 'Banking & Finance', stages: 'Loan Verification → KYC → Approval' },
+                  { name: 'E-commerce & Logistics', stages: 'Warehouse → Dispatch → Returns' },
+                  { name: 'Airport Operations', stages: 'Check-in → Security → Boarding' },
+                  { name: 'Construction Management', stages: 'Material Delivery → Framing → Inspection' },
+                  { name: 'Civil Engineering', stages: 'Earthworks → Quality Check → Drainage' },
+                  { name: 'Architecture & Design', stages: 'Design Review → Permit → Revision' },
+                ].map(ind => (
                   <div key={ind.name} className="p-3 rounded-lg bg-gray-800 border border-gray-700">
                     <p className="text-xs font-semibold text-white mb-1">{ind.name}</p>
                     <p className="text-xs text-gray-500">{ind.stages}</p>
@@ -1724,71 +1740,40 @@ export default function Home() {
                 ))}
               </div>
             </section>
+
+            {/* Intelligence Engine */}
             <section>
               <h3 className="text-sm font-semibold text-indigo-400 uppercase tracking-wider mb-3">Intelligence Engine — 5 Phases</h3>
               <div className="space-y-3">
-                {[{phase:'Phase 1',title:'Data Foundation',desc:'30 days of realistic historical metrics seeded per industry with built-in patterns — Monday material delivery spikes, Thursday/Friday cruise terminal failures, Monday/Friday architecture deadline rushes.'},{phase:'Phase 2',title:'Pattern Intelligence',desc:'Stage health scores (0–100), recurring pattern detection from 30-day history, cascade prediction between stages with confidence %, and anomaly scoring vs 30-day baseline.'},{phase:'Phase 3',title:'Predictive Intelligence',desc:'ETA to breach using linear regression on health trajectories, 7-day capacity forecasting from historical breach patterns, and what-if simulation for operational changes.'},{phase:'Phase 4',title:'Recommendation Intelligence',desc:'Confidence scoring on every AI analysis, outcome tracking after resolution, resolution effectiveness per stage, and AI-generated SOPs grounded in actual past incident data.'},{phase:'Phase 5',title:'Human-in-the-Loop AI Agent',desc:'An autonomous agent using 5 tools to investigate the operation — health scores, cascade risks, ETAs, patterns, open incidents — then surfaces every consequential decision to the user before acting.'}].map(p => (
+                {[
+                  { phase: 'Phase 1', title: 'Data Foundation', desc: '30 days of realistic historical metrics seeded per industry with built-in patterns — Monday material delivery spikes, Thursday/Friday cruise failures, Monday/Friday architecture deadline rushes.' },
+                  { phase: 'Phase 2', title: 'Pattern Intelligence', desc: 'Stage health scores (0–100), recurring pattern detection from 30-day history, cascade prediction between stages with confidence %, and anomaly scoring vs 30-day baseline.' },
+                  { phase: 'Phase 3', title: 'Predictive Intelligence', desc: 'ETA to breach using linear regression on health trajectories, 7-day capacity forecasting from historical breach patterns, and what-if simulation for operational changes.' },
+                  { phase: 'Phase 4', title: 'Recommendation Intelligence', desc: 'AI analysis grounded in actual metric values (not generic advice), confidence scoring, outcome tracking after resolution, resolution effectiveness per stage, and AI-generated SOPs from real incident history.' },
+                  { phase: 'Phase 5', title: 'Human-in-the-Loop AI Agent', desc: 'An autonomous agent using 5 tools — health scores, cascade risks, ETAs, patterns, open incidents — that surfaces every consequential decision to the user before acting. The agent never acts without approval.' },
+                ].map(p => (
                   <div key={p.phase} className="flex gap-3 p-3 rounded-lg bg-gray-800 border border-gray-700">
                     <span className="text-xs font-bold text-indigo-400 shrink-0 w-16">{p.phase}</span>
-                    <div><p className="text-xs font-semibold text-white mb-1">{p.title}</p><p className="text-xs text-gray-400 leading-relaxed">{p.desc}</p></div>
+                    <div>
+                      <p className="text-xs font-semibold text-white mb-1">{p.title}</p>
+                      <p className="text-xs text-gray-400 leading-relaxed">{p.desc}</p>
+                    </div>
                   </div>
                 ))}
               </div>
             </section>
-            <section>
-              <h3 className="text-sm font-semibold text-indigo-400 uppercase tracking-wider mb-3">What Companies Did Before This</h3>
-              <div className="space-y-2">
-                {[{tier:'Tier 1',label:'Basic Dashboards',desc:'Numbers on a screen. A human looks at them, recognizes something is bad, and reacts. By then, the damage is done.'},{tier:'Tier 2',label:'Alert Systems',desc:'Threshold breached → email sent. Still reactive. No context, no root cause, no cascade prediction.'},{tier:'Tier 3',label:'BI Tools (Tableau, PowerBI)',desc:'Beautiful historical reports. Great for board meetings. Useless for real-time operations. They tell you what happened, not what is about to happen.'},{tier:'Tier 4',label:'Enterprise Platforms (ServiceNow)',desc:'$50k–$500k/year, months of integration, built for IT incidents. No predictive or AI reasoning layer.'}].map(t => (
-                  <div key={t.tier} className="flex gap-3 p-3 rounded-lg bg-gray-800/50 border border-gray-700">
-                    <span className="text-xs font-bold text-gray-600 shrink-0 w-12">{t.tier}</span>
-                    <div><p className="text-xs font-semibold text-gray-300 mb-0.5">{t.label}</p><p className="text-xs text-gray-500 leading-relaxed">{t.desc}</p></div>
-                  </div>
-                ))}
-              </div>
-            </section>
-            <section>
-              <h3 className="text-sm font-semibold text-indigo-400 uppercase tracking-wider mb-3">How It's Different From Claude / ChatGPT</h3>
-              <p className="text-xs text-gray-400 leading-relaxed mb-3">Claude and ChatGPT are general-purpose AI assistants. This platform is a <span className="text-white font-medium">domain-specific AI system</span> built on top of an LLM — using Groq not as the product, but as the reasoning engine inside a larger system with its own data layer, business logic, pattern detection, and human-in-the-loop control flow.</p>
-              <div className="rounded-xl overflow-hidden border border-gray-700">
-                <table className="w-full text-xs">
-                  <thead><tr className="bg-gray-800"><th className="text-left px-3 py-2 text-gray-500 font-medium"></th><th className="text-left px-3 py-2 text-gray-400 font-medium">Claude / ChatGPT</th><th className="text-left px-3 py-2 text-indigo-400 font-medium">This Platform</th></tr></thead>
-                  <tbody className="divide-y divide-gray-800">
-                    {[['What it knows','Everything generally','Your specific operational data'],['How triggered','You ask it','Monitors and acts autonomously'],['Memory','Per conversation','30 days persistent in database'],['Output','Generic text answers','Specific numbers, predictions, SOPs'],['Integration','Standalone chat','Live data, webhooks, file upload'],['Role of AI','The product','The reasoning engine inside a larger system']].map(([label,before,after]) => (
-                      <tr key={label} className="bg-gray-900/50"><td className="px-3 py-2 text-gray-500">{label}</td><td className="px-3 py-2 text-gray-400">{before}</td><td className="px-3 py-2 text-indigo-300">{after}</td></tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
+
+            {/* Additional features */}
             <section>
               <h3 className="text-sm font-semibold text-indigo-400 uppercase tracking-wider mb-3">Additional Features</h3>
               <div className="space-y-2">
                 {[
-                  {
-                    icon: '📁',
-                    title: 'File Upload with AI Column Mapping',
-                    desc: 'Upload any Excel or CSV file — Groq automatically identifies which of your columns map to stage, queue size, processing time, and throughput. Your file does not need to be formatted in any specific way.'
-                  },
-                  {
-                    icon: '💬',
-                    title: 'Community Suggestions',
-                    desc: 'Built-in feedback system on the dashboard. Anyone can submit improvement ideas, new industry requests, or bug reports. All suggestions are visible to everyone in real time.'
-                  },
-                  {
-                    icon: '🔔',
-                    title: 'Email Alerts',
-                    desc: 'HIGH severity incidents and new community suggestions trigger instant email notifications via Resend — so critical issues and new ideas are never missed.'
-                  },
-                  {
-                    icon: '🔗',
-                    title: 'Webhook Ingestion',
-                    desc: 'POST /webhook/events accepts live operational data from any external system. Automatically creates incidents and triggers AI analysis for HIGH severity events — no manual input needed.'
-                  },
-                  {
-                    icon: '📋',
-                    title: 'Audit Trail',
-                    desc: 'Every AI analysis, agent investigation, and resolution outcome is logged with timestamps and stored in Supabase — giving a full history of what was detected, analyzed, and actioned.'
-                  },
+                  { icon: '🔐', title: 'Authentication & Data Isolation', desc: 'Sign up for free. Unauthenticated visitors see demo data. Signed-in users see demo data + their own private operational data — fully isolated.' },
+                  { icon: '🔗', title: 'Connect Your System', desc: 'POST real metrics via webhook from any system. Curl, Python, and JavaScript snippets in the Connect panel. Alert correlation merges duplicate incidents automatically.' },
+                  { icon: '📁', title: 'File Upload with AI Column Mapping', desc: 'Upload any Excel or CSV — Groq automatically maps your columns to stage/queue/processing/throughput regardless of how your columns are named.' },
+                  { icon: '🔔', title: 'Slack Alerts', desc: 'HIGH severity incidents fire instant Slack notifications to your team channel via incoming webhooks.' },
+                  { icon: '🧠', title: 'Grounded AI Analysis', desc: 'Every AI analysis is given actual metric numbers (queue=67, threshold=50, health 81→65) before generating recommendations. No generic advice.' },
+                  { icon: '💬', title: 'Community Suggestions', desc: 'Built-in feedback system. Anyone can submit ideas directly from the dashboard — visible to everyone in real time.' },
                 ].map(f => (
                   <div key={f.title} className="flex gap-3 p-3 rounded-lg bg-gray-800 border border-gray-700">
                     <span className="text-lg shrink-0">{f.icon}</span>
@@ -1800,10 +1785,69 @@ export default function Home() {
                 ))}
               </div>
             </section>
+
+            {/* What companies did before */}
+            <section>
+              <h3 className="text-sm font-semibold text-indigo-400 uppercase tracking-wider mb-3">What Companies Did Before This</h3>
+              <div className="space-y-2">
+                {[
+                  { tier: 'Tier 1', label: 'Basic Dashboards', desc: 'Numbers on a screen. A human looks at them, recognizes something is bad, and reacts. By then, the damage is done.' },
+                  { tier: 'Tier 2', label: 'Alert Systems', desc: 'Threshold breached → email sent. Still reactive. No context, no root cause, no cascade prediction.' },
+                  { tier: 'Tier 3', label: 'BI Tools (Tableau, PowerBI)', desc: 'Beautiful historical reports. Great for board meetings. Useless for real-time operations. They tell you what happened, not what is about to happen.' },
+                  { tier: 'Tier 4', label: 'Enterprise Platforms (ServiceNow)', desc: '$50k–$500k/year, months of integration, built for IT incidents. No predictive or AI reasoning layer.' },
+                ].map(t => (
+                  <div key={t.tier} className="flex gap-3 p-3 rounded-lg bg-gray-800/50 border border-gray-700">
+                    <span className="text-xs font-bold text-gray-600 shrink-0 w-12">{t.tier}</span>
+                    <div>
+                      <p className="text-xs font-semibold text-gray-300 mb-0.5">{t.label}</p>
+                      <p className="text-xs text-gray-500 leading-relaxed">{t.desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* How it's different from Claude */}
+            <section>
+              <h3 className="text-sm font-semibold text-indigo-400 uppercase tracking-wider mb-3">How It&apos;s Different From Claude / ChatGPT</h3>
+              <p className="text-xs text-gray-400 leading-relaxed mb-3">Claude and ChatGPT are general-purpose AI assistants. This platform is a <span className="text-white font-medium">domain-specific AI system</span> built on top of an LLM — using Groq not as the product, but as the reasoning engine inside a larger system with its own data layer, business logic, pattern detection, and human-in-the-loop control flow.</p>
+              <div className="rounded-xl overflow-hidden border border-gray-700">
+                <table className="w-full text-xs">
+                  <thead><tr className="bg-gray-800"><th className="text-left px-3 py-2 text-gray-500 font-medium"></th><th className="text-left px-3 py-2 text-gray-400 font-medium">Claude / ChatGPT</th><th className="text-left px-3 py-2 text-indigo-400 font-medium">This Platform</th></tr></thead>
+                  <tbody className="divide-y divide-gray-800">
+                    {[
+                      ['What it knows', 'Everything generally', 'Your specific operational data'],
+                      ['How triggered', 'You ask it', 'Monitors and acts autonomously'],
+                      ['Memory', 'Per conversation', '30 days persistent in database'],
+                      ['Output', 'Generic text answers', 'Specific numbers, predictions, SOPs'],
+                      ['Integration', 'Standalone chat', 'Live data, webhooks, file upload, auth'],
+                      ['Role of AI', 'The product', 'The reasoning engine inside a larger system'],
+                    ].map(([label, before, after]) => (
+                      <tr key={label} className="bg-gray-900/50">
+                        <td className="px-3 py-2 text-gray-500">{label}</td>
+                        <td className="px-3 py-2 text-gray-400">{before}</td>
+                        <td className="px-3 py-2 text-indigo-300">{after}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            {/* Tech stack */}
             <section>
               <h3 className="text-sm font-semibold text-indigo-400 uppercase tracking-wider mb-3">Tech Stack</h3>
               <div className="grid grid-cols-2 gap-2 text-xs">
-                {[{label:'Frontend',value:'Next.js 16 + TypeScript + Tailwind'},{label:'Backend',value:'FastAPI (Python) on Render'},{label:'Database',value:'Supabase (PostgreSQL)'},{label:'AI — Production',value:'Groq llama-3.3-70b-versatile'},{label:'AI — Local Dev',value:'Ollama + llama3.2'},{label:'Agent',value:'Groq native tool-calling API'},{label:'Frontend Hosting',value:'Vercel (auto-deploy)'},{label:'Version Control',value:'GitHub'}].map(t => (
+                {[
+                  { label: 'Frontend', value: 'Next.js 16 + TypeScript + Tailwind' },
+                  { label: 'Backend', value: 'FastAPI (Python) on Render' },
+                  { label: 'Database', value: 'Supabase (PostgreSQL + Auth)' },
+                  { label: 'Auth', value: 'Supabase Auth — email/password + JWT' },
+                  { label: 'AI — Production', value: 'Groq llama-3.3-70b-versatile' },
+                  { label: 'AI — Local Dev', value: 'Ollama + llama3.2' },
+                  { label: 'Agent', value: 'Groq native tool-calling API' },
+                  { label: 'Alerts', value: 'Resend (email) + Slack webhooks' },
+                ].map(t => (
                   <div key={t.label} className="flex gap-2 p-2 rounded-lg bg-gray-800">
                     <span className="text-gray-500 shrink-0">{t.label}:</span>
                     <span className="text-gray-300">{t.value}</span>
@@ -1811,6 +1855,8 @@ export default function Home() {
                 ))}
               </div>
             </section>
+
+            {/* Built by */}
             <section className="border-t border-gray-800 pt-6">
               <div className="flex items-center gap-4 p-4 rounded-xl bg-indigo-500/5 border border-indigo-500/20">
                 <div className="w-12 h-12 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-lg shrink-0">KJ</div>

@@ -15,7 +15,7 @@ Organizations run critical workflows across many systems, teams, and handoffs. W
 
 **Ops Intelligence Platform detects workflow bottlenecks before they become crises.**
 
-Anyone can visit the live URL, select their industry, explore real incident data, and get AI-powered root cause analysis and recommended actions in under 3 seconds — with zero setup.
+Anyone can visit the live URL, sign up for free, connect their real operational data via webhook, and get AI-powered root cause analysis, cascade predictions, breach forecasts, and autonomous agent investigations — all with human approval at every consequential step.
 
 ---
 
@@ -25,7 +25,7 @@ Anyone can visit the live URL, select their industry, explore real incident data
 🔌 **Backend API:** https://ops-intelligence-platform.onrender.com/docs
 📁 **GitHub:** https://github.com/kushaljaink/ops-intelligence-platform
 
-> ⚠️ Backend runs on Render's free tier — spins down after 15 min of inactivity. First request may take 30–50 seconds. Visit `/health` first to wake it up.
+> ⚠️ Backend runs on Render's free tier — spins down after 15 min of inactivity. First request may take 30–50 seconds. Visit `/health` to wake it up before a demo.
 
 ---
 
@@ -38,13 +38,11 @@ Anyone can visit the live URL, select their industry, explore real incident data
 | Tier 3 | BI Tools (Tableau, PowerBI) | Beautiful historical reports. Tell you what happened, not what's about to happen. |
 | Tier 4 | Enterprise platforms (ServiceNow) | $50k–$500k/year, months of integration, built for IT. No predictive AI layer. |
 
-**This platform is different.** It reasons about your data, predicts cascades before they happen, simulates the impact of changes, and deploys an AI agent that investigates autonomously — then waits for your approval before acting.
+**This platform is different.** It reasons about your data, predicts cascades before they happen, simulates the impact of operational changes, correlates alerts to cut noise, and runs an autonomous AI agent that investigates — then waits for your approval before acting.
 
 ---
 
 ## How It's Different From Claude / ChatGPT
-
-Claude and ChatGPT are general-purpose AI assistants. This platform is a **domain-specific AI system** built on top of an LLM.
 
 | | Claude / ChatGPT | This Platform |
 |---|---|---|
@@ -52,21 +50,19 @@ Claude and ChatGPT are general-purpose AI assistants. This platform is a **domai
 | How triggered | You ask it | Monitors and acts autonomously |
 | Memory | Per conversation | 30 days persistent in database |
 | Output | Generic text answers | Specific numbers, predictions, SOPs |
-| Integration | Standalone chat | Live data, webhooks, file upload |
+| Integration | Standalone chat | Live data via webhooks, file upload, API |
 | Role of AI | The product | The reasoning engine inside a larger system |
-
-> This platform uses Groq (same class of technology as Claude) not as the product, but as the **reasoning engine** inside a larger system with its own data layer, business logic, pattern detection, prediction algorithms, and human-in-the-loop control flow.
 
 ---
 
 ## Supported Industries
 
-8 industries supported out of the box, each with calibrated thresholds, 30 days of seeded historical data with realistic patterns, and industry-appropriate AI analysis:
+8 industries with calibrated thresholds, 30 days of seeded historical data with realistic patterns, and industry-appropriate AI analysis:
 
 | Industry | Key Stages | Critical Thresholds |
 |---|---|---|
 | Cruise Terminal | Baggage Drop → Security → Biometrics | Queue > 50, Processing > 300s |
-| Healthcare | Triage → Bed Allocation → Diagnostics | Queue > 20, Processing > 120s |
+| Healthcare | ED Triage → Bed Allocation → Diagnostics | Queue > 20, Processing > 120s |
 | Banking & Finance | Loan Verification → KYC → Approval | Queue > 100, Processing > 600s |
 | E-commerce & Logistics | Warehouse → Dispatch → Returns | Queue > 200, Processing > 180s |
 | Airport Operations | Check-in → Security → Boarding | Queue > 80, Processing > 240s |
@@ -75,14 +71,12 @@ Claude and ChatGPT are general-purpose AI assistants. This platform is a **domai
 | Architecture & Design | Design Review → Permit → Revision | Queue > 10, Processing > 720s |
 | Custom | Any workflow you define | User-configurable |
 
-Each industry has **seeded behavioral patterns** — Monday morning material delivery spikes for construction, Thursday/Friday cascade failures for cruise terminals, Monday/Friday deadline rushes for architecture firms.
-
 ---
 
 ## Intelligence Engine — 5 Phases
 
 ### Phase 1 — Data Foundation
-30 days of realistic historical metrics seeded per industry. Readings every 2 hours. Built-in patterns: time-of-day peaks, day-of-week failures, cascade relationships between stages. Powers all intelligence features.
+30 days of realistic historical metrics per industry with seeded behavioral patterns: Monday morning material delivery spikes for construction, Thursday/Friday cascade failures for cruise terminals, Monday/Friday deadline rushes for architecture. Powers all downstream intelligence.
 
 ### Phase 2 — Pattern Intelligence
 - **Stage Health Scores** — 0–100 score per stage based on last 24hrs of metrics with improving/degrading/stable trend indicators
@@ -97,7 +91,8 @@ Each industry has **seeded behavioral patterns** — Monday morning material del
 
 ### Phase 4 — Recommendation Intelligence
 - **Confidence Scoring** — every AI analysis shows a 0–100% confidence score extracted from Groq's language, with a visual confidence bar
-- **Outcome Tracking** — after resolving an incident, logs what action was taken, categorizes it (staffing/equipment/process/escalation), and records health score before and after
+- **Grounded Analysis** — AI is given actual metric values (queue=67, processing=420s, health trajectory 81→74→65) before analyzing — no generic advice
+- **Outcome Tracking** — after resolving an incident, logs what action was taken, categorizes it (staffing/equipment/process/escalation), and records health before and after
 - **Resolution Effectiveness** — tracks per-stage resolution rates, recurrence gaps, and avg resolution time; flags stages where fixes aren't holding
 - **Playbook Generator** — generates full SOPs (trigger conditions, immediate actions, escalation, root cause checklist, prevention) grounded in actual past incident data
 
@@ -105,27 +100,47 @@ Each industry has **seeded behavioral patterns** — Monday morning material del
 An autonomous agent built on Groq's native tool-calling API. Investigates the operation using 5 tools, then surfaces every consequential decision to the user before acting. **The agent never acts without user approval.**
 
 **Agent tools:**
-- `check_health_scores` — gets current 0–100 score per stage
-- `get_open_incidents` — fetches all active incidents with IDs
-- `get_cascade_predictions` — checks for active cascade risks
-- `get_eta_to_breach` — calculates urgency of declining stages
-- `get_recurring_patterns` — pulls 30-day pattern data for a specific stage
-
-**Human-in-the-loop decisions after every investigation:**
-- Acknowledge critical issues → user approves or skips
-- Generate playbooks for recurring stages → user approves or skips
-- Send cascade alert → user approves or skips
-- Log investigation to audit trail → user approves or skips
+- `check_health_scores` — current 0–100 score per stage
+- `get_open_incidents` — all active incidents with IDs and severity
+- `get_cascade_predictions` — active cascade risks with confidence %
+- `get_eta_to_breach` — urgency of declining stages via linear regression
+- `get_recurring_patterns` — 30-day pattern data for a specific stage
 
 ---
 
 ## Additional Features
 
-- **File Upload with AI Column Mapping** — upload any CSV or Excel file; Groq automatically identifies which columns map to stage/queue/processing/throughput, regardless of column names
-- **Community Suggestions** — built-in feedback system; anyone can submit improvement ideas directly from the dashboard
-- **Webhook Ingestion** — `POST /webhook/events` accepts live operational data from external systems; auto-creates incidents and triggers AI analysis for HIGH severity events
-- **Email Alerts** — HIGH severity incidents and new suggestions trigger email notifications via Resend
-- **Audit Trail** — every AI analysis, agent investigation, and outcome is logged with timestamps
+### Authentication & User Data Isolation
+- Email/password signup via Supabase Auth
+- Unauthenticated visitors see demo data only
+- Signed-in users see demo data + their own private operational data
+- Personal API keys generated on signup for webhook authentication
+
+### Connect Your System (Webhook)
+- `POST /webhook/events` accepts live operational data from any system
+- Curl, Python, and JavaScript code snippets available in the dashboard
+- **Alert correlation** — duplicate incidents on the same stage within 30 minutes are merged instead of creating noise
+- **Test button** — send a sample event and watch it appear as a live incident
+
+### File Upload with AI Column Mapping
+- Upload any Excel or CSV file — Groq automatically maps your columns to stage/queue/processing/throughput
+- No specific format required — works with whatever column names you already use
+
+### Slack Alerts
+- HIGH severity incidents and new community suggestions trigger Slack notifications
+- Configurable via `SLACK_WEBHOOK_URL` environment variable
+
+### Community Suggestions
+- Built-in feedback form on the dashboard
+- All suggestions visible to everyone in real time
+- New suggestions trigger email notification to the platform owner
+
+### Email Alerts
+- HIGH severity incidents trigger email via Resend
+- Community suggestions trigger notification emails
+
+### Audit Trail
+- Every AI analysis, agent investigation, and resolution outcome logged with timestamps
 
 ---
 
@@ -135,15 +150,16 @@ An autonomous agent built on Groq's native tool-calling API. Investigates the op
 |---|---|---|
 | Frontend | Next.js 16 + TypeScript + Tailwind | Deployed on Vercel, auto-deploys on push |
 | Backend API | FastAPI (Python) | Deployed on Render free tier |
-| Database | Supabase (PostgreSQL) | 6 tables: incidents, workflow_metrics, analysis_logs, incident_outcomes, recommendations, suggestions |
+| Database | Supabase (PostgreSQL) | 7 tables with RLS, user isolation |
+| Auth | Supabase Auth | Email/password, JWT, personal API keys |
 | AI — Production | Groq (llama-3.3-70b-versatile) | Free tier, 2–3 second response times |
 | AI — Local Dev | Ollama + llama3.2 | Still works locally for development |
-| Agent | Groq native tool-calling | No LangChain — direct function calling via OpenAI-compatible API |
+| Agent | Groq native tool-calling | No LangChain — direct function calling |
 | File Parsing | openpyxl + python-multipart | Excel and CSV upload support |
-| Email | Resend | Alerts for HIGH severity incidents and suggestions |
+| Email | Resend | Alerts for HIGH severity incidents |
+| Slack | Incoming Webhooks | Real-time ops alerts |
 | Frontend Hosting | Vercel | Always on, auto-deploy |
 | Backend Hosting | Render | Free tier, spins down after 15 min |
-| Version Control | GitHub | Public repo |
 
 ---
 
@@ -153,12 +169,13 @@ An autonomous agent built on Groq's native tool-calling API. Investigates the op
 | Method | Endpoint | Description |
 |---|---|---|
 | GET | `/health` | Health check |
-| GET | `/incidents?industry=cruise` | Get incidents filtered by industry |
+| GET | `/auth/me` | Get authenticated user info and API key |
+| GET | `/incidents?industry=cruise` | Get incidents (demo + user's own if authenticated) |
 | GET | `/incidents/stats?industry=cruise` | Stats with trend vs yesterday |
 | PATCH | `/incidents/{id}/resolve` | Mark incident resolved |
-| POST | `/analyze-incident/{id}` | AI analysis with confidence score |
-| POST | `/incidents/{id}/outcome` | Log what action was taken post-resolution |
-| GET | `/incidents/{id}/analysis-history` | Full AI analysis history for an incident |
+| POST | `/analyze-incident/{id}` | AI analysis grounded in actual metrics |
+| POST | `/incidents/{id}/outcome` | Log resolution action and outcome |
+| GET | `/incidents/{id}/analysis-history` | Full AI analysis history |
 
 ### Intelligence Engine
 | Method | Endpoint | Description |
@@ -167,9 +184,9 @@ An autonomous agent built on Groq's native tool-calling API. Investigates the op
 | GET | `/intelligence/recurring-patterns?industry=cruise` | 30-day breach pattern analysis |
 | GET | `/intelligence/cascade-predictions?industry=cruise` | Active cascade risks with confidence % |
 | GET | `/intelligence/anomaly-scores?industry=cruise` | Anomaly vs 30-day baseline |
-| GET | `/intelligence/eta-to-breach?industry=cruise` | Hours to critical threshold via linear regression |
-| GET | `/intelligence/capacity-forecast?industry=cruise` | 7-day risk forecast from historical patterns |
-| GET | `/intelligence/whatif-simulation?stage=security_check&change=add_staff&magnitude=2` | Simulate operational changes |
+| GET | `/intelligence/eta-to-breach?industry=cruise` | Hours to critical threshold |
+| GET | `/intelligence/capacity-forecast?industry=cruise` | 7-day risk forecast |
+| GET | `/intelligence/whatif-simulation` | Simulate operational changes |
 | GET | `/intelligence/resolution-effectiveness?industry=cruise` | Per-stage resolution analytics |
 | GET | `/intelligence/playbook/{stage}?industry=cruise` | Generate AI-powered SOP |
 
@@ -182,7 +199,9 @@ An autonomous agent built on Groq's native tool-calling API. Investigates the op
 ### Data Ingestion
 | Method | Endpoint | Description |
 |---|---|---|
-| POST | `/webhook/events` | Ingest live operational data from external systems |
+| POST | `/webhook/events` | Ingest live operational data (supports `api_key` for user isolation) |
+| POST | `/test-webhook?industry=healthcare` | Send a test event |
+| GET | `/connect-info` | Get webhook URL and code snippets |
 | POST | `/analyze-custom` | Analyze custom workflow data (form/CSV) |
 | POST | `/extract-and-analyze` | Upload any file — AI maps columns automatically |
 
@@ -197,12 +216,13 @@ An autonomous agent built on Groq's native tool-calling API. Investigates the op
 ## Database Schema
 
 ```sql
-incidents           -- Active incidents per industry and stage
-workflow_metrics    -- Raw time-series metrics (health score, queue, processing, throughput)
-analysis_logs       -- AI analysis history with confidence scores, triggered_by
+incidents           -- Active incidents per industry and stage, user_id for isolation
+workflow_metrics    -- Raw time-series metrics, user_id for isolation
+analysis_logs       -- AI analysis history with confidence scores
 incident_outcomes   -- Logged resolution actions and health before/after
 recommendations     -- Static recommendations per incident
 suggestions         -- Community improvement suggestions
+user_api_keys       -- Personal API keys for webhook authentication
 ```
 
 ---
@@ -220,52 +240,77 @@ cd ops-intelligence-platform
 cd backend
 python -m venv venv
 venv\Scripts\activate          # Windows
-# source venv/bin/activate     # Mac/Linux
 pip install -r requirements.txt
 
-# Create .env with:
-# SUPABASE_URL=your_url
-# SUPABASE_KEY=your_service_role_key (legacy eyJ format)
-# GROQ_API_KEY=your_groq_key
+# backend/.env
+SUPABASE_URL=your_project_url
+SUPABASE_KEY=your_service_role_key
+GROQ_API_KEY=your_groq_key
+SUPABASE_JWT_SECRET=your_jwt_secret
+SLACK_WEBHOOK_URL=optional
 
-uvicorn main:app --reload      # Runs on localhost:8000
+uvicorn main:app --reload      # http://localhost:8000
 
 # Frontend (new terminal)
 cd frontend
 npm install
-npm run dev                    # Runs on localhost:3000
+
+# frontend/.env.local
+NEXT_PUBLIC_SUPABASE_URL=your_project_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
+
+npm run dev                    # http://localhost:3000
 ```
+
+---
+
+## Connecting Real Data
+
+Once signed in, get your personal API key from the **Connect** panel. Then POST your operational metrics:
+
+```python
+import httpx
+
+httpx.post("https://ops-intelligence-platform.onrender.com/webhook/events", json={
+    "api_key": "your_personal_api_key",
+    "events": [{
+        "stage": "ed_triage",
+        "queue_size": 32,
+        "processing_time_seconds": 210,
+        "throughput": 7,
+        "industry": "healthcare"
+    }]
+})
+```
+
+Your data appears privately on your dashboard. The platform automatically detects threshold breaches, correlates related alerts, calculates health scores, and makes the incident available for AI analysis and agent investigation.
 
 ---
 
 ## Maintenance (Free Tier)
 
-**Weekly (2 minutes):**
-- Visit Supabase dashboard to keep project active (pauses after 7 days of inactivity)
-- Visit `https://ops-intelligence-platform.onrender.com/health` to wake Render backend
+**Weekly:** Visit Supabase dashboard to keep project active (pauses after 7 days). Visit `/health` to wake Render.
 
-**Before sharing with a recruiter:**
+**Before a demo:**
 1. Visit `/health` — wait for `{"status":"ok"}`
-2. Open the live Vercel URL — confirm incidents load for your selected industry
+2. Refresh the dashboard — confirm incidents load
 3. Click **Analyze with AI** on one incident — confirm Groq responds in ~3 seconds
-4. Run **AI Agent Investigation** — confirm 5 tool calls complete and decision points appear
-5. Share the links
+4. Run **AI Agent Investigation** — confirm 5 tool calls complete
+5. Share the link
 
 ---
 
 ## Contributing
 
-Have an idea to improve this platform? Two ways:
+**From the live site** — go to the **Community** tab in the Intelligence Engine and submit a suggestion. Shows up live for everyone.
 
-1. **From the live site** — click any industry's dashboard, scroll to the **Intelligence Engine → Community** tab, and submit a suggestion directly. It shows up live for everyone.
+**Via GitHub** — open an issue at [github.com/kushaljaink/ops-intelligence-platform/issues](https://github.com/kushaljaink/ops-intelligence-platform/issues).
 
-2. **Via GitHub** — open an issue at [github.com/kushaljaink/ops-intelligence-platform/issues](https://github.com/kushaljaink/ops-intelligence-platform/issues) with your feature request, bug report, or industry suggestion.
-
-Want to add a new industry? The pattern is:
-- Add thresholds to `INDUSTRY_THRESHOLDS` in `main.py` and `ops_agent.py`
-- Add industry context to `INDUSTRY_CONTEXT` in `page.tsx`
-- Add to `INDUSTRIES` array in `page.tsx`
-- Seed demo incidents and 30 days of metrics via SQL
+**Adding a new industry:**
+1. Add thresholds to `INDUSTRY_THRESHOLDS` in `main.py` and `ops_agent.py`
+2. Add context to `INDUSTRY_CONTEXT` in `page.tsx`
+3. Add to `INDUSTRIES` array in `page.tsx`
+4. Seed demo incidents and 30 days of metrics via SQL
 
 ---
 
@@ -275,6 +320,6 @@ Want to add a new industry? The pattern is:
 
 Built end-to-end using VS Code + Claude Code + Claude.ai.
 
-🌐 Live: https://ops-intelligence-platform.vercel.app
-📁 GitHub: https://github.com/kushaljaink/ops-intelligence-platform
-🔌 API: https://ops-intelligence-platform.onrender.com/docs
+🌐 https://ops-intelligence-platform.vercel.app
+📁 https://github.com/kushaljaink/ops-intelligence-platform
+🔌 https://ops-intelligence-platform.onrender.com/docs
