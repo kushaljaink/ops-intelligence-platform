@@ -254,18 +254,22 @@ Use actual numbers and stage names. Be specific and urgent."""
             response.raise_for_status()
             data = response.json()
             choice = data["choices"][0]
-            message = choice["message"]
+            message = choice.get("message") or {}
+            if not message:
+                output = "Agent received an empty response. Please try again."
+                break
 
             # Add assistant message to history
             messages.append(message)
 
             # If no tool calls, agent is done
-            if not message.get("tool_calls"):
+            tool_calls = message.get("tool_calls") or []
+            if not tool_calls:
                 output = message.get("content", "Investigation complete.")
                 break
 
             # Execute each tool call
-            for tool_call in message["tool_calls"]:
+            for tool_call in tool_calls:
                 tool_name = tool_call["function"]["name"]
                 try:
                     tool_args = json.loads(tool_call["function"]["arguments"] or "{}")
