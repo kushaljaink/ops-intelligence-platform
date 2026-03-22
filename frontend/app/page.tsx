@@ -289,13 +289,22 @@ export default function Home() {
     finally { setIntelLoading(false) }
   }
 
+  const getAuthHeaders = useCallback((): Record<string, string> => {
+    if (!session?.access_token) return {}
+    return { Authorization: `Bearer ${session.access_token}` }
+  }, [session?.access_token])
+
+  const buildFetchOptions = useCallback((): RequestInit => {
+    const headers = getAuthHeaders()
+    return Object.keys(headers).length > 0 ? { headers } : {}
+  }, [getAuthHeaders])
+
   const fetchData = useCallback(async (industry: string) => {
-    const authHeaders = session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}
     setLoading(true); setError(null); setIncidents([]); setAnalyses({}); setStats(null)
     try {
       const [incData, statsData] = await Promise.all([
-        fetch(`${BACKEND}/incidents?industry=${industry}`, { headers: authHeaders }).then(r => r.json()),
-        fetch(`${BACKEND}/incidents/stats?industry=${industry}`, { headers: authHeaders }).then(r => r.json()),
+        fetch(`${BACKEND}/incidents?industry=${industry}`, buildFetchOptions()).then(r => r.json()),
+        fetch(`${BACKEND}/incidents/stats?industry=${industry}`, buildFetchOptions()).then(r => r.json()),
       ])
       setIncidents(incData.incidents ?? [])
       setStats(statsData)
@@ -304,7 +313,7 @@ export default function Home() {
     } finally {
       setLoading(false)
     }
-  }, [session?.access_token])
+  }, [buildFetchOptions])
 
   useEffect(() => {
     // Auth listener
