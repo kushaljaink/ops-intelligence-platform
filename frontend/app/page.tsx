@@ -148,7 +148,7 @@ export default function Home() {
   const [forecast, setForecast] = useState<ForecastSlot[]>([])
   const [effectiveness, setEffectiveness] = useState<ResolutionEffectiveness[]>([])
   const [intelLoading, setIntelLoading] = useState(false)
-  const [activeIntelTab, setActiveIntelTab] = useState<'health' | 'patterns' | 'cascade' | 'anomaly' | 'eta' | 'forecast' | 'whatif' | 'effectiveness' | 'playbook' | 'community'>('health')
+  const [activeIntelTab, setActiveIntelTab] = useState<'health' | 'patterns' | 'cascade' | 'anomaly' | 'eta' | 'forecast' | 'whatif' | 'effectiveness' | 'playbook'>('health')
 
   // What-if
   const [whatIfStage, setWhatIfStage] = useState('')
@@ -497,7 +497,6 @@ export default function Home() {
     { key: 'whatif', label: 'What-If Simulation' },
     { key: 'effectiveness', label: 'Resolution Effectiveness' },
     { key: 'playbook', label: 'Playbook Generator' },
-    { key: 'community', label: '💬 Community' },
   ] as const
 
   return (
@@ -825,86 +824,6 @@ export default function Home() {
             )}
 
             {/* Community */}
-            {activeIntelTab === 'community' && (
-              <div>
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <p className="text-xs text-gray-500">Ideas and suggestions submitted by people using this platform. Have an idea? Submit it below.</p>
-                  </div>
-                  <a href="https://github.com/kushaljaink/ops-intelligence-platform/issues/new" target="_blank" rel="noreferrer" className="text-xs text-gray-500 hover:text-indigo-400 transition-colors whitespace-nowrap ml-4">Open GitHub Issue →</a>
-                </div>
-
-                {/* Submit form */}
-                <div className="p-4 rounded-xl bg-gray-800 border border-gray-700 mb-6">
-                  <p className="text-xs font-semibold text-white mb-3">Submit an Idea</p>
-                  <div className="space-y-3">
-                    <div className="flex gap-2">
-                      {['feature', 'industry', 'improvement', 'bug'].map(cat => (
-                        <button
-                          key={cat}
-                          onClick={() => setSuggestCategory(cat)}
-                          className={`px-3 py-1 rounded-full text-xs font-medium transition-colors capitalize ${suggestCategory === cat ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-400 hover:text-white'}`}
-                        >
-                          {cat}
-                        </button>
-                      ))}
-                    </div>
-                    <input
-                      value={suggestTitle}
-                      onChange={e => { setSuggestTitle(e.target.value); setSuggestSuccess(false) }}
-                      placeholder="What's your idea? (required)"
-                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500"
-                    />
-                    <textarea
-                      value={suggestDescription}
-                      onChange={e => setSuggestDescription(e.target.value)}
-                      placeholder="More details... (optional)"
-                      rows={2}
-                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 resize-none"
-                    />
-                    <div className="flex items-center gap-3">
-                      <button
-                        onClick={submitSuggestion}
-                        disabled={suggestSubmitting || !suggestTitle.trim()}
-                        className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition-colors"
-                      >
-                        {suggestSubmitting ? 'Submitting…' : 'Submit Idea'}
-                      </button>
-                      {suggestSuccess && <span className="text-xs text-green-400">✓ Submitted! Thank you.</span>}
-                      {suggestError && <span className="text-xs text-red-400">{suggestError}</span>}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Suggestions list */}
-                <div className="space-y-3">
-                  {suggestions.length === 0 && (
-                    <div className="p-6 rounded-xl bg-gray-800/50 border border-gray-700 text-center">
-                      <p className="text-sm text-gray-500">No suggestions yet. Be the first to submit an idea!</p>
-                    </div>
-                  )}
-                  {suggestions.map(s => (
-                    <div key={s.id} className="p-4 rounded-xl bg-gray-800 border border-gray-700">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${
-                              s.category === 'feature' ? 'bg-indigo-500/20 text-indigo-400' :
-                              s.category === 'industry' ? 'bg-green-500/20 text-green-400' :
-                              s.category === 'improvement' ? 'bg-yellow-500/20 text-yellow-400' :
-                              'bg-red-500/20 text-red-400'
-                            }`}>{s.category}</span>
-                          </div>
-                          <p className="text-sm font-medium text-white">{s.title}</p>
-                          {s.description && <p className="text-xs text-gray-400 mt-1 leading-relaxed">{s.description}</p>}
-                        </div>
-                        <p className="text-xs text-gray-600 shrink-0">{new Date(s.submitted_at).toLocaleDateString()}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
 
             {/* Playbook Generator */}
             {activeIntelTab === 'playbook' && (
@@ -1335,6 +1254,93 @@ export default function Home() {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── IDEAS & FEEDBACK SECTION ── */}
+      <div className="max-w-7xl mx-auto mt-16 mb-8 bg-gray-900 rounded-3xl border border-gray-800 overflow-hidden">
+        {/* Big pill header */}
+        <div className="flex justify-center pt-10 pb-6">
+          <div className="flex items-center gap-0 bg-gray-800 rounded-full border border-gray-700 overflow-hidden text-sm font-semibold">
+            <span className="px-6 py-3 text-indigo-400 border-r border-gray-700">💡 Ideas &amp; Feedback</span>
+            <span className="px-6 py-3 text-purple-400 border-r border-gray-700">✦ Shape This Platform</span>
+            <span className="px-6 py-3 text-pink-400">🙋 Have an Idea?</span>
+          </div>
+        </div>
+        <p className="text-center text-gray-500 text-sm mb-10">Suggestions from people using this platform. Drop yours below — every idea is read.</p>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 px-10 pb-10">
+          {/* Submit form */}
+          <div className="bg-gray-800 rounded-2xl border border-gray-700 p-6">
+            <p className="text-base font-bold text-white mb-4">Submit an Idea</p>
+            <div className="space-y-4">
+              <div className="flex gap-2 flex-wrap">
+                {['feature', 'industry', 'improvement', 'bug'].map(cat => (
+                  <button
+                    key={cat}
+                    onClick={() => setSuggestCategory(cat)}
+                    className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors capitalize ${suggestCategory === cat ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/30' : 'bg-gray-700 text-gray-400 hover:text-white border border-gray-600'}`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+              <input
+                value={suggestTitle}
+                onChange={e => { setSuggestTitle(e.target.value); setSuggestSuccess(false) }}
+                placeholder="What's your idea? (required)"
+                className="w-full bg-gray-700 border border-gray-600 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+              />
+              <textarea
+                value={suggestDescription}
+                onChange={e => setSuggestDescription(e.target.value)}
+                placeholder="More details... (optional)"
+                rows={4}
+                className="w-full bg-gray-700 border border-gray-600 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 resize-none"
+              />
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={submitSuggestion}
+                  disabled={suggestSubmitting || !suggestTitle.trim()}
+                  className="px-6 py-2.5 rounded-full text-sm font-bold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition-colors shadow-lg shadow-indigo-500/30"
+                >
+                  {suggestSubmitting ? 'Submitting…' : 'Submit Idea'}
+                </button>
+                <a href="https://github.com/kushaljaink/ops-intelligence-platform/issues/new" target="_blank" rel="noreferrer" className="text-xs text-gray-500 hover:text-indigo-400 transition-colors">Open GitHub Issue →</a>
+              </div>
+              {suggestSuccess && <p className="text-sm text-green-400">✓ Submitted! Thank you.</p>}
+              {suggestError && <p className="text-sm text-red-400">{suggestError}</p>}
+            </div>
+          </div>
+
+          {/* Suggestions list */}
+          <div className="space-y-3 overflow-y-auto max-h-96">
+            {suggestions.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full py-16 text-center">
+                <p className="text-4xl mb-3">💬</p>
+                <p className="text-gray-400 font-medium">No ideas yet.</p>
+                <p className="text-gray-600 text-sm mt-1">Be the first to shape this platform.</p>
+              </div>
+            ) : suggestions.map(s => (
+              <div key={s.id} className="p-4 rounded-xl bg-gray-800 border border-gray-700">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${
+                        s.category === 'feature' ? 'bg-indigo-500/20 text-indigo-400' :
+                        s.category === 'industry' ? 'bg-green-500/20 text-green-400' :
+                        s.category === 'improvement' ? 'bg-yellow-500/20 text-yellow-400' :
+                        'bg-red-500/20 text-red-400'
+                      }`}>{s.category}</span>
+                    </div>
+                    <p className="text-sm font-medium text-white">{s.title}</p>
+                    {s.description && <p className="text-xs text-gray-400 mt-1 leading-relaxed">{s.description}</p>}
+                  </div>
+                  <p className="text-xs text-gray-600 shrink-0">{new Date(s.submitted_at).toLocaleDateString()}</p>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>
