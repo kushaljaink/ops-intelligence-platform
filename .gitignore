@@ -3,4 +3,3 @@ frontend/.env.local
 backend/venv/
 backend/__pycache__/
 frontend/node_modules/
-real_data_connectors.py
