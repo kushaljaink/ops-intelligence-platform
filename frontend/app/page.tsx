@@ -507,23 +507,12 @@ export default function Home() {
 
         {/* Header */}
         <div className="mb-6">
-          <div className="flex items-start justify-between gap-4 mb-4">
-            <div>
-              <div className="flex items-center gap-3 mb-2">
-                <div className="w-2 h-8 bg-indigo-500 rounded-full" />
-                <h1 className="text-4xl font-extrabold tracking-tight">Ops Intelligence Platform</h1>
-              </div>
-              <p className="text-gray-400 text-base ml-5">AI-powered workflow monitoring & bottleneck detection — <span className="text-indigo-400 font-medium">{selectedIndustry === 'custom' && customIndustry ? `${customIndustry.charAt(0).toUpperCase() + customIndustry.slice(1)} Operations` : industryLabel}</span></p>
-            </div>
-            <button
-              onClick={() => setShowAbout(true)}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 text-sm text-white font-semibold transition-colors shadow-lg shadow-indigo-500/30 shrink-0"
-            >
-              <span>ℹ</span>
-              <span>About</span>
-            </button>
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-2 h-8 bg-indigo-500 rounded-full" />
+            <h1 className="text-4xl font-extrabold tracking-tight">Ops Intelligence Platform</h1>
           </div>
-          <div className="flex flex-wrap gap-2 ml-5">
+          <p className="text-gray-400 text-base ml-5 mb-4">AI-powered workflow monitoring & bottleneck detection — <span className="text-indigo-400 font-medium">{selectedIndustry === 'custom' && customIndustry ? `${customIndustry.charAt(0).toUpperCase() + customIndustry.slice(1)} Operations` : industryLabel}</span></p>
+          <div className="flex flex-wrap items-center gap-2 ml-5">
             {INDUSTRIES.filter(i => i.value !== 'custom').map(i => (
               <button
                 key={i.value}
@@ -555,6 +544,14 @@ export default function Home() {
                 className="bg-gray-800 border border-gray-600 rounded-full px-4 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 w-40"
               />
             )}
+            <div className="w-px h-6 bg-gray-700 mx-1" />
+            <button
+              onClick={() => setShowAbout(true)}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-semibold text-indigo-400 hover:text-white bg-indigo-500/10 hover:bg-indigo-600 border border-indigo-500/40 hover:border-indigo-500 transition-colors"
+            >
+              <span>✦</span>
+              <span>How It Works</span>
+            </button>
           </div>
         </div>
 
