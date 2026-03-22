@@ -548,24 +548,215 @@ class AgentDecisionRequest(BaseModel):
 
 @app.post("/agent/investigate")
 async def agent_investigate(body: AgentInvestigateRequest):
+    """Run agent investigation with inline execution — no module import to avoid cache issues."""
+    import json as _json
+
+    industry = body.industry
+    goal = body.goal or f"Investigate the {industry} operation. Check health scores, open incidents, cascade risks, ETAs, and patterns for any critical stages. Provide a prioritized action plan."
+
+    AGENT_TOOLS = [
+        {"type": "function", "function": {"name": "check_health_scores", "description": "Check current health scores for all stages. Always call this first.", "parameters": {"type": "object", "properties": {}, "required": []}}},
+        {"type": "function", "function": {"name": "get_open_incidents", "description": "Get all currently open incidents.", "parameters": {"type": "object", "properties": {}, "required": []}}},
+        {"type": "function", "function": {"name": "get_cascade_predictions", "description": "Check for active cascade risks between stages.", "parameters": {"type": "object", "properties": {}, "required": []}}},
+        {"type": "function", "function": {"name": "get_eta_to_breach", "description": "Get ETA to breach for all declining stages.", "parameters": {"type": "object", "properties": {}, "required": []}}},
+        {"type": "function", "function": {"name": "get_recurring_patterns", "description": "Get recurring failure patterns for a specific stage.", "parameters": {"type": "object", "properties": {"stage_name": {"type": "string", "description": "The exact stage name e.g. security_check"}}, "required": ["stage_name"]}}},
+    ]
+
+    def _execute_tool(tool_name: str, tool_args: dict) -> str:
+        thresholds = INDUSTRY_THRESHOLDS.get(industry, {"queue": 50, "processing": 300, "throughput": 10})
+        try:
+            if tool_name == "check_health_scores":
+                cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+                resp = supabase.table("workflow_metrics").select("stage, health_score, recorded_at").eq("industry", industry).gte("recorded_at", cutoff).order("recorded_at", desc=True).execute()
+                stage_readings: dict = defaultdict(list)
+                for row in (resp.data or []):
+                    stage_readings[row["stage"]].append(row["health_score"])
+                if not stage_readings:
+                    return "No health data available."
+                results = []
+                for stage, scores in stage_readings.items():
+                    recent = scores[:3]
+                    current = recent[0]
+                    trend = "stable"
+                    if len(recent) >= 2:
+                        diff = recent[0] - recent[-1]
+                        trend = "degrading" if diff > 5 else "improving" if diff < -5 else "stable"
+                    status = "healthy" if current >= 80 else "warning" if current >= 60 else "critical" if current >= 40 else "severe"
+                    results.append(f"- {stage}: health={current}, trend={trend}, status={status}")
+                return "Health scores:\n" + "\n".join(results)
+
+            elif tool_name == "get_open_incidents":
+                resp = supabase.table("incidents").select("id, stage, severity, description").eq("industry", industry).eq("status", "open").order("created_at", desc=True).execute()
+                if not resp.data:
+                    return "No open incidents."
+                results = [f"- [{i['severity'].upper()}] {i['stage']}: {i['description']} (id: {i['id'][:8]}...)" for i in resp.data]
+                return f"Open incidents ({len(resp.data)}):\n" + "\n".join(results)
+
+            elif tool_name == "get_cascade_predictions":
+                cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+                resp = supabase.table("workflow_metrics").select("stage, queue_size, processing_time_seconds, throughput, health_score, recorded_at").eq("industry", industry).gte("recorded_at", cutoff).order("recorded_at").execute()
+                stage_buckets: dict = defaultdict(dict)
+                for row in (resp.data or []):
+                    ts = datetime.fromisoformat(row["recorded_at"].replace("Z", "+00:00"))
+                    bk = ts.replace(minute=0, second=0, microsecond=0).isoformat()
+                    breached = row["queue_size"] > thresholds["queue"] or row["processing_time_seconds"] > thresholds["processing"] or row["throughput"] < thresholds["throughput"]
+                    stage_buckets[row["stage"]][bk] = {"health": row["health_score"], "breached": breached}
+                stages = list(stage_buckets.keys())
+                active_risks = []
+                for source in stages:
+                    for target in stages:
+                        if source == target:
+                            continue
+                        sd = stage_buckets[source]
+                        td = stage_buckets[target]
+                        cc = 0
+                        sbc = 0
+                        for bk, reading in sd.items():
+                            if not reading["breached"]:
+                                continue
+                            sbc += 1
+                            ts2 = datetime.fromisoformat(bk)
+                            ftk = (ts2 + timedelta(hours=2)).isoformat()
+                            fr = td.get(ftk)
+                            if fr and fr["breached"]:
+                                cc += 1
+                        if sbc < 5:
+                            continue
+                        conf = round(cc / sbc * 100)
+                        if conf < 40:
+                            continue
+                        recent_src = sorted(sd.keys())[-3:]
+                        stressed = any(sd[k]["breached"] for k in recent_src)
+                        if stressed and conf >= 60:
+                            active_risks.append(f"ACTIVE RISK: {source} -> {target} ({conf}% confidence)")
+                return "Cascade risks:\n" + "\n".join(active_risks) if active_risks else "No active cascade risks."
+
+            elif tool_name == "get_eta_to_breach":
+                cutoff = (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat()
+                resp = supabase.table("workflow_metrics").select("stage, health_score, queue_size, processing_time_seconds, throughput, recorded_at").eq("industry", industry).gte("recorded_at", cutoff).order("recorded_at", desc=True).execute()
+                sr: dict = defaultdict(list)
+                for row in (resp.data or []):
+                    sr[row["stage"]].append(row)
+                results = []
+                for stage, readings in sr.items():
+                    if len(readings) < 3:
+                        continue
+                    recent = readings[:6]
+                    hv = [r["health_score"] for r in recent]
+                    ch = hv[0]
+                    n = len(hv)
+                    x = list(range(n))
+                    xm = sum(x) / n
+                    ym = sum(hv) / n
+                    num = sum((x[i] - xm) * (hv[i] - ym) for i in range(n))
+                    den = sum((x[i] - xm) ** 2 for i in range(n))
+                    slope = num / den if den != 0 else 0
+                    hcph = slope / 2
+                    already = readings[0]["queue_size"] > thresholds["queue"] or readings[0]["processing_time_seconds"] > thresholds["processing"] or readings[0]["throughput"] < thresholds["throughput"]
+                    if already:
+                        results.append(f"- {stage}: ALREADY BREACHED")
+                    elif hcph < 0 and ch < 85:
+                        hrs = round((ch - 40) / abs(hcph), 1)
+                        urg = "CRITICAL" if hrs <= 2 else "WARNING" if hrs <= 6 else "MONITOR"
+                        results.append(f"- {stage}: {urg} breach in ~{hrs}hrs (health: {ch})")
+                return "ETA to breach:\n" + "\n".join(results) if results else "All stages stable."
+
+            elif tool_name == "get_recurring_patterns":
+                sn = tool_args.get("stage_name", "")
+                if not sn:
+                    return "Provide a stage_name."
+                cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+                resp = supabase.table("workflow_metrics").select("queue_size, processing_time_seconds, throughput, recorded_at").eq("industry", industry).eq("stage", sn).gte("recorded_at", cutoff).execute()
+                if not resp.data:
+                    return f"No data for '{sn}'."
+                breaches = []
+                for row in resp.data:
+                    if row["queue_size"] > thresholds["queue"] or row["processing_time_seconds"] > thresholds["processing"] or row["throughput"] < thresholds["throughput"]:
+                        ts = datetime.fromisoformat(row["recorded_at"].replace("Z", "+00:00"))
+                        breaches.append({"hour": ts.hour, "dow": int(ts.strftime("%w"))})
+                if not breaches:
+                    return f"'{sn}' has no breaches in 30 days."
+                hc: dict = defaultdict(int)
+                dc: dict = defaultdict(int)
+                for b in breaches:
+                    hc[b["hour"]] += 1
+                    dc[b["dow"]] += 1
+                ph = max(hc, key=lambda h: hc[h])
+                pd = max(dc, key=lambda d: dc[d])
+                hl = f"{'12' if ph == 12 else ph % 12 or 12}{'am' if ph < 12 else 'pm'}"
+                dn = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"]
+                return f"'{sn}': {len(breaches)} breaches in 30 days. Peak: {hl} ({round(hc[ph]/len(breaches)*100)}%). Peak day: {dn[pd]}s ({round(dc[pd]/len(breaches)*100)}%)."
+            else:
+                return f"Unknown tool: {tool_name}"
+        except Exception as e:
+            return f"Tool error ({tool_name}): {str(e)}"
+
+    system_prompt = f"""You are an AI operations intelligence agent for a {industry} operation.
+Investigate systematically:
+1. check_health_scores first
+2. get_open_incidents
+3. get_cascade_predictions
+4. get_eta_to_breach
+5. get_recurring_patterns for any critical/severe stage
+Then write: CRITICAL ISSUES / WARNING ISSUES / RECOMMENDED ACTIONS."""
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": goal},
+    ]
+
+    parsed_steps = []
+    output = "Investigation complete."
+
     try:
-        from ops_agent import run_investigation
-        result = run_investigation(
-            supabase=supabase,
-            groq_api_key=GROQ_API_KEY,
-            industry=body.industry,
-            custom_goal=body.goal or "",
-        )
-        if not result.get("success"):
-            error_msg = result.get("error", "Unknown error")
-            if "GROQ_RATE_LIMIT" in str(error_msg):
-                raise HTTPException(status_code=429, detail=error_msg)
-            raise HTTPException(status_code=500, detail=error_msg)
-        return result
+        with httpx.Client(timeout=90.0) as client:
+            for _ in range(10):
+                resp = client.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+                    json={"model": "llama-3.3-70b-versatile", "messages": messages, "tools": AGENT_TOOLS, "tool_choice": "auto", "max_tokens": 1500},
+                )
+                if resp.status_code == 429:
+                    raise HTTPException(status_code=429, detail="GROQ_RATE_LIMIT: Rate limited. Wait 60 seconds.")
+                resp.raise_for_status()
+                data = resp.json()
+                choices = data.get("choices") or []
+                if not choices:
+                    output = "Empty response from AI. Try again."
+                    break
+                message = choices[0].get("message") or {}
+                messages.append(message)
+                tool_calls = message.get("tool_calls") or []
+                if not tool_calls:
+                    output = message.get("content") or "Investigation complete."
+                    break
+                for tc in tool_calls:
+                    fn = tc.get("function") or {}
+                    tn = fn.get("name", "")
+                    try:
+                        ta = _json.loads(fn.get("arguments") or "{}")
+                    except Exception:
+                        ta = {}
+                    finding = _execute_tool(tn, ta)
+                    parsed_steps.append({"step": len(parsed_steps) + 1, "tool": tn, "input": str(ta.get("stage_name", "")), "finding": str(finding)[:500]})
+                    messages.append({"role": "tool", "tool_call_id": tc.get("id", ""), "content": str(finding)})
+
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Agent error: {str(e)}")
+
+    ol = output.lower()
+    dps = []
+    if any(w in ol for w in ["critical", "severe", "breached", "immediate"]):
+        dps.append({"id": "acknowledge_critical", "type": "acknowledge", "question": "The agent found critical issues. Do you want to acknowledge these and flag them for the ops team?", "action": "trigger_alerts"})
+    if any(w in ol for w in ["recurring", "pattern", "breaches in 30"]):
+        dps.append({"id": "generate_playbook", "type": "playbook", "question": "Recurring failure patterns were detected. Do you want to auto-generate playbooks for affected stages?", "action": "generate_playbooks"})
+    if "cascade" in ol:
+        dps.append({"id": "cascade_alert", "type": "alert", "question": "A cascade risk was detected. Do you want to note this for the ops team?", "action": "send_cascade_alert"})
+    dps.append({"id": "log_investigation", "type": "audit", "question": "Log this investigation to the audit trail?", "action": "log_audit"})
+
+    return {"success": True, "industry": industry, "goal": goal, "steps": parsed_steps, "output": output, "decision_points": dps, "investigated_at": datetime.now(timezone.utc).isoformat()}
 
 
 @app.post("/agent/decision")
