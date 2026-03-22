@@ -81,7 +81,11 @@ const INDUSTRIES = [
 
 const INDUSTRY_CONTEXT: Record<string, { scenario: string; what: string; example: WorkflowRow }> = {
   cruise: { scenario: 'A cruise terminal processing 3,000 passengers for embarkation', what: 'Each incident represents a boarding workflow stage where metrics have breached operational thresholds.', example: { stage: 'baggage_drop', queue_size: '65', processing_time_seconds: '420', throughput: '6' } },
-  healthcare: { scenario: 'A hospital emergency department during a high-demand shift', what: 'Each incident represents a patient flow stage where wait times or throughput have exceeded safe limits.', example: { stage: 'patient_triage', queue_size: '28', processing_time_seconds: '180', throughput: '8' } },
+  healthcare: {
+    scenario: 'A hospital emergency department managing patient flow during a high-demand shift',
+    what: 'Each incident represents a patient care stage where wait times, bed occupancy, or throughput have exceeded safe clinical thresholds. ED boarding time above 4 hours triggers mandatory diversion protocols.',
+    example: { stage: 'ed_triage', queue_size: '28', processing_time_seconds: '180', throughput: '8' },
+  },
   banking: { scenario: 'A retail bank processing loan applications during peak season', what: 'Each incident represents a processing stage where backlog or SLA thresholds have been breached.', example: { stage: 'loan_verification', queue_size: '140', processing_time_seconds: '720', throughput: '3' } },
   ecommerce: { scenario: 'A fulfilment warehouse during a high-volume sales event', what: 'Each incident represents a fulfilment stage where pick rates or queue sizes have hit critical levels.', example: { stage: 'warehouse_picking', queue_size: '320', processing_time_seconds: '250', throughput: '30' } },
   airport: { scenario: 'An international airport terminal during morning peak hours', what: 'Each incident represents a passenger processing stage where throughput or wait times have exceeded safe thresholds.', example: { stage: 'security_screening', queue_size: '95', processing_time_seconds: '300', throughput: '14' } },
@@ -125,6 +129,11 @@ export default function Home() {
 
   // Outcome tracking
   const [showAbout, setShowAbout] = useState(false)
+  const [showConnect, setShowConnect] = useState(false)
+  const [connectInfo, setConnectInfo] = useState<{webhook_url: string; curl_example: string; python_example: string; javascript_example: string} | null>(null)
+  const [connectSnippet, setConnectSnippet] = useState<'curl' | 'python' | 'javascript'>('curl')
+  const [testLoading, setTestLoading] = useState(false)
+  const [testResult, setTestResult] = useState<string | null>(null)
   const [showSuggest, setShowSuggest] = useState(false)
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [suggestTitle, setSuggestTitle] = useState('')
@@ -237,6 +246,7 @@ export default function Home() {
     fetchIntelligence(industryValue)
     setWhatIfStage(''); setWhatIfResult(null); setPlaybook(null); setPlaybookStage('')
     fetchSuggestions()
+    fetchConnectInfo()
   }, [industryValue])
 
   const analyzeIncident = async (id: string) => {
@@ -424,6 +434,33 @@ export default function Home() {
     } catch { /* ignore */ }
   }
 
+  const fetchConnectInfo = async () => {
+    try {
+      const r = await fetch(`${BACKEND}/connect-info`)
+      const d = await r.json()
+      setConnectInfo(d)
+    } catch { /* ignore */ }
+  }
+
+  const runTestWebhook = async () => {
+    setTestLoading(true)
+    setTestResult(null)
+    try {
+      const r = await fetch(`${BACKEND}/test-webhook?industry=${industryValue}`, { method: 'POST' })
+      const d = await r.json()
+      if (d.success) {
+        setTestResult(`✓ ${d.message}. Refresh the page to see the new incident.`)
+        fetchData(industryValue)
+      } else {
+        setTestResult('Test failed. Check backend logs.')
+      }
+    } catch {
+      setTestResult('Could not reach backend. Wake it up first.')
+    } finally {
+      setTestLoading(false)
+    }
+  }
+
   const analyzeUpload = async () => {
     if (!uploadFile) return
     setUploadLoading(true)
@@ -512,13 +549,22 @@ export default function Home() {
           </div>
           <div className="flex items-center justify-between mb-4">
             <p className="text-gray-400 text-base ml-5">AI-powered workflow monitoring & bottleneck detection — <span className="text-indigo-400 font-medium">{selectedIndustry === 'custom' && customIndustry ? `${customIndustry.charAt(0).toUpperCase() + customIndustry.slice(1)} Operations` : industryLabel}</span></p>
-            <button
-              onClick={() => setShowAbout(true)}
-              className="flex items-center gap-2 px-5 py-2 rounded-full text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-400 shadow-lg shadow-indigo-500/40 transition-colors shrink-0"
-            >
-              <span>✦</span>
-              <span>How It Works</span>
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => setShowConnect(true)}
+                className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold text-green-400 hover:text-white bg-green-500/10 hover:bg-green-600 border border-green-500/40 hover:border-green-500 transition-colors"
+              >
+                <span>🔗</span>
+                <span>Connect</span>
+              </button>
+              <button
+                onClick={() => setShowAbout(true)}
+                className="flex items-center gap-2 px-5 py-2 rounded-full text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-400 shadow-lg shadow-indigo-500/40 transition-colors"
+              >
+                <span>✦</span>
+                <span>How It Works</span>
+              </button>
+            </div>
           </div>
           <div className="flex flex-wrap gap-2 ml-5">
               {INDUSTRIES.filter(i => i.value !== 'custom').map(i => (
@@ -1345,6 +1391,126 @@ export default function Home() {
         </div>
       </div>
     </main>
+
+    {showConnect && (
+      <div className="fixed inset-0 z-50 flex justify-end">
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowConnect(false)} />
+        <div className="relative w-full max-w-2xl h-full bg-gray-900 border-l border-gray-700 shadow-2xl flex flex-col">
+          <div className="flex items-start justify-between p-6 border-b border-gray-800 shrink-0">
+            <div>
+              <h2 className="text-xl font-bold text-white mb-1">Connect Your System</h2>
+              <p className="text-sm text-gray-400">Send real operational data from any system — no SDK required.</p>
+            </div>
+            <button onClick={() => setShowConnect(false)} className="text-gray-500 hover:text-white transition-colors text-2xl leading-none">×</button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-6 space-y-6">
+
+            <div className="p-4 rounded-xl bg-indigo-500/5 border border-indigo-500/20">
+              <p className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-2">How it works</p>
+              <div className="space-y-2 text-xs text-gray-400">
+                <p>1. Your system sends a POST request with metric data (queue size, processing time, throughput)</p>
+                <p>2. The platform compares against industry thresholds and calculates a health score</p>
+                <p>3. If thresholds are breached, an incident is automatically created on the dashboard</p>
+                <p>4. The AI agent can then investigate your real incident on demand</p>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-white uppercase tracking-wider mb-3">What data to send</p>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                {[
+                  {field: 'stage', desc: 'Name of the workflow step', example: 'ed_triage, loan_review'},
+                  {field: 'queue_size', desc: 'Items currently waiting', example: '45 (patients, orders, tasks)'},
+                  {field: 'processing_time_seconds', desc: 'How long each item takes', example: '280 (seconds)'},
+                  {field: 'throughput', desc: 'Output per hour', example: '8 (patients/hr, loans/hr)'},
+                  {field: 'industry', desc: 'Your industry key', example: 'healthcare, banking, construction'},
+                ].map(f => (
+                  <div key={f.field} className="p-2 rounded-lg bg-gray-800 border border-gray-700">
+                    <p className="text-indigo-400 font-mono mb-0.5">{f.field}</p>
+                    <p className="text-gray-400">{f.desc}</p>
+                    <p className="text-gray-600 italic">{f.example}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-white uppercase tracking-wider mb-2">Your Webhook URL</p>
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-gray-800 border border-gray-700">
+                <code className="text-green-400 text-xs flex-1 break-all">{connectInfo?.webhook_url ?? 'https://ops-intelligence-platform.onrender.com/webhook/events'}</code>
+                <button
+                  onClick={() => navigator.clipboard.writeText(connectInfo?.webhook_url ?? '')}
+                  className="text-xs text-gray-500 hover:text-white transition-colors whitespace-nowrap px-2 py-1 rounded bg-gray-700"
+                >Copy</button>
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs font-semibold text-white uppercase tracking-wider">Code Examples</p>
+                <div className="flex rounded-lg bg-gray-800 p-0.5">
+                  {(['curl', 'python', 'javascript'] as const).map(lang => (
+                    <button key={lang} onClick={() => setConnectSnippet(lang)} className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${connectSnippet === lang ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`}>{lang}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="relative">
+                <pre className="p-4 rounded-xl bg-gray-800 border border-gray-700 text-xs text-green-300 overflow-x-auto leading-relaxed whitespace-pre-wrap">
+                  {connectSnippet === 'curl' && (connectInfo?.curl_example ?? 'Loading...')}
+                  {connectSnippet === 'python' && (connectInfo?.python_example ?? 'Loading...')}
+                  {connectSnippet === 'javascript' && (connectInfo?.javascript_example ?? 'Loading...')}
+                </pre>
+                <button
+                  onClick={() => {
+                    const text = connectSnippet === 'curl' ? connectInfo?.curl_example : connectSnippet === 'python' ? connectInfo?.python_example : connectInfo?.javascript_example
+                    if (text) navigator.clipboard.writeText(text)
+                  }}
+                  className="absolute top-2 right-2 text-xs text-gray-500 hover:text-white bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded transition-colors"
+                >Copy</button>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl bg-gray-800 border border-gray-700">
+              <p className="text-xs font-semibold text-white mb-1">Test Your Connection</p>
+              <p className="text-xs text-gray-400 mb-3">Send a sample {industryLabel} event right now to see how the platform responds.</p>
+              <button
+                onClick={runTestWebhook}
+                disabled={testLoading}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-green-600 hover:bg-green-500 disabled:opacity-50 transition-colors"
+              >
+                {testLoading ? (
+                  <><svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" /></svg>Sending test event…</>
+                ) : '⚡ Send Test Event'}
+              </button>
+              {testResult && (
+                <p className={`mt-3 text-xs ${testResult.startsWith('✓') ? 'text-green-400' : 'text-red-400'}`}>{testResult}</p>
+              )}
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-white uppercase tracking-wider mb-3">Ideas for what to connect</p>
+              <div className="space-y-2 text-xs">
+                {[
+                  {icon: '🏥', title: 'Hospital Systems', desc: 'Epic, Cerner, or custom EHR — send patient flow metrics every 15 min'},
+                  {icon: '🏗️', title: 'Construction PM Tools', desc: 'Procore, Buildertrend — send crew queue and task completion rates daily'},
+                  {icon: '🏦', title: 'Banking Middleware', desc: 'Kafka topics, queue managers — stream processing times as they happen'},
+                  {icon: '📦', title: 'Warehouse Systems', desc: 'WMS exports — send pick rates and dispatch queue every hour'},
+                  {icon: '✈️', title: 'Airport Ops', desc: 'AODB or custom ground ops system — send gate and check-in throughput'},
+                  {icon: '⏰', title: 'Cron Job', desc: 'A simple cron that queries your database every 30 min and posts metrics'},
+                ].map(idea => (
+                  <div key={idea.title} className="flex gap-3 p-2 rounded-lg bg-gray-800/50">
+                    <span className="text-lg shrink-0">{idea.icon}</span>
+                    <div><p className="text-white font-medium">{idea.title}</p><p className="text-gray-500">{idea.desc}</p></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    )}
 
     {showAbout && (
       <div className="fixed inset-0 z-50 flex justify-end">

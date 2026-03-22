@@ -29,6 +29,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 ALERT_EMAIL = os.getenv("ALERT_EMAIL", "")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
+SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
 
 INDUSTRY_THRESHOLDS = {
     "cruise":        {"queue": 50,  "processing": 300, "throughput": 10},
@@ -105,6 +106,25 @@ async def send_alert_email(incident: dict):
         )
 
 
+async def send_slack_alert(stage: str, severity: str, description: str, industry: str, health: float = None, eta_hours: float = None):
+    if not SLACK_WEBHOOK_URL:
+        return
+    emoji = "🚨" if severity == "high" else "⚠️"
+    health_str = f" | Health: {health}/100" if health else ""
+    eta_str = f" | Breach in ~{eta_hours}hrs" if eta_hours else ""
+    text = (
+        f"{emoji} *{severity.upper()} — {stage.replace('_', ' ').title()}* ({industry})\n"
+        f"{description}\n"
+        f"{health_str}{eta_str}\n"
+        f"<https://ops-intelligence-platform.vercel.app|View Dashboard →>"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.post(SLACK_WEBHOOK_URL, json={"text": text})
+    except Exception:
+        pass  # Never let Slack failure break the main flow
+
+
 # ─── Core routes ──────────────────────────────────────────────────────────────
 
 @app.get("/health")
@@ -162,12 +182,52 @@ async def analyze_incident(incident_id: str):
         raise HTTPException(status_code=404, detail="Incident not found")
     incident = result.data
     industry = incident.get("industry", "operations")
-    prompt = (f"Senior ops analyst. {industry}.\nStage: {incident.get('stage')} | Severity: {incident.get('severity')}\nDescription: {incident.get('description')}\n1. Root cause\n2. Downstream impact\n3. 3 actions in 30 min. No generic advice.")
+
+    # Fetch last 6 metric readings for richer AI context
+    metrics_resp = supabase.table("workflow_metrics").select(
+        "queue_size, processing_time_seconds, throughput, health_score, recorded_at"
+    ).eq("industry", industry).eq("stage", incident.get("stage", "")).order(
+        "recorded_at", desc=True
+    ).limit(6).execute()
+
+    metrics_context = ""
+    if metrics_resp.data:
+        readings = metrics_resp.data
+        health_trend = " → ".join(str(r["health_score"]) for r in reversed(readings))
+        latest = readings[0]
+        thresholds = INDUSTRY_THRESHOLDS.get(industry, {"queue": 50, "processing": 300, "throughput": 10})
+        metrics_context = (
+            f"\nActual metrics (most recent first):"
+            f"\n  Queue size: {latest['queue_size']} (threshold: {thresholds['queue']})"
+            f"\n  Processing time: {latest['processing_time_seconds']}s (threshold: {thresholds['processing']}s)"
+            f"\n  Throughput: {latest['throughput']}/hr (threshold: {thresholds['throughput']}/hr)"
+            f"\n  Health trajectory: {health_trend}"
+        )
+
+    prompt = (
+        f"Senior ops analyst. Industry: {industry}.\n"
+        f"Stage: {incident.get('stage')} | Severity: {incident.get('severity')}\n"
+        f"Description: {incident.get('description')}"
+        f"{metrics_context}\n\n"
+        f"Using the actual numbers above:\n"
+        f"1. Specific root cause (reference the exact metric values)\n"
+        f"2. Downstream cascade impact on other stages\n"
+        f"3. Three concrete actions in the next 30 minutes\n"
+        f"No generic advice. Use actual numbers."
+    )
     analysis = await call_groq(prompt)
     confidence_score, confidence_reason = extract_confidence(analysis)
     supabase.table("analysis_logs").insert({"incident_id": incident_id, "ai_analysis": analysis, "triggered_by": "user", "confidence_score": confidence_score, "confidence_reason": confidence_reason}).execute()
     if incident.get("severity") == "high":
         await send_alert_email(incident)
+        latest_health = metrics_resp.data[0]["health_score"] if metrics_resp.data else None
+        await send_slack_alert(
+            stage=incident.get("stage", ""),
+            severity=incident.get("severity", ""),
+            description=incident.get("description", ""),
+            industry=industry,
+            health=latest_health,
+        )
     return {"incident_id": incident_id, "stage": incident.get("stage"), "severity": incident.get("severity"), "ai_analysis": analysis, "confidence_score": confidence_score, "confidence_reason": confidence_reason}
 
 
@@ -976,6 +1036,88 @@ def get_suggestions():
     return {"suggestions": response.data}
 
 
+@app.get("/connect-info")
+def get_connect_info():
+    """Returns connection info and code snippets for users to connect real data."""
+    backend_url = "https://ops-intelligence-platform.onrender.com"
+    return {
+        "webhook_url": f"{backend_url}/webhook/events",
+        "docs_url": f"{backend_url}/docs",
+        "curl_example": f"""curl -X POST {backend_url}/webhook/events \\
+  -H "Content-Type: application/json" \\
+  -d '{{
+    "events": [{{
+      "stage": "your_stage_name",
+      "queue_size": 45,
+      "processing_time_seconds": 280,
+      "throughput": 8,
+      "industry": "healthcare"
+    }}]
+  }}'""",
+        "python_example": f"""import httpx
+
+httpx.post("{backend_url}/webhook/events", json={{
+    "events": [{{
+        "stage": "your_stage_name",
+        "queue_size": 45,
+        "processing_time_seconds": 280,
+        "throughput": 8,
+        "industry": "healthcare"
+    }}]
+}})""",
+        "javascript_example": f"""fetch("{backend_url}/webhook/events", {{
+  method: "POST",
+  headers: {{ "Content-Type": "application/json" }},
+  body: JSON.stringify({{
+    events: [{{
+      stage: "your_stage_name",
+      queue_size: 45,
+      processing_time_seconds: 280,
+      throughput: 8,
+      industry: "healthcare"
+    }}]
+  }})
+}})""",
+    }
+
+
+@app.post("/test-webhook")
+async def test_webhook(industry: str = "healthcare"):
+    """Send a test event to verify webhook connectivity."""
+    import random
+    stages = {
+        "healthcare": [("ed_triage", 25, 150, 8), ("bed_assignment", 18, 200, 5)],
+        "cruise": [("baggage_drop", 60, 400, 7), ("security_check", 55, 320, 8)],
+        "construction": [("material_delivery", 7, 280, 2), ("site_inspection", 6, 260, 2)],
+        "banking": [("loan_verification", 120, 650, 4), ("kyc_check", 110, 700, 3)],
+        "airport": [("checkin", 90, 250, 18), ("security_screening", 85, 260, 17)],
+        "civil": [("earthworks", 10, 500, 1), ("quality_check", 9, 490, 1)],
+        "architecture": [("design_review", 12, 750, 0), ("permit_submission", 11, 760, 0)],
+        "ecommerce": [("warehouse_pick", 220, 190, 48), ("dispatch", 210, 185, 47)],
+    }
+    stage_data = stages.get(industry, stages["healthcare"])
+    stage_name, base_queue, base_proc, base_throughput = random.choice(stage_data)
+    queue = base_queue + random.randint(-5, 15)
+    proc = base_proc + random.randint(-20, 80)
+    throughput = max(0, base_throughput + random.randint(-3, 1))
+
+    payload = WebhookPayload(events=[WebhookEvent(
+        stage=stage_name,
+        queue_size=float(queue),
+        processing_time_seconds=float(proc),
+        throughput=float(throughput),
+        industry=industry,
+        source="test",
+    )])
+    result = await receive_webhook(payload)
+    return {
+        "success": True,
+        "message": f"Test event sent for {stage_name} ({industry})",
+        "data_sent": {"stage": stage_name, "queue_size": queue, "processing_time_seconds": proc, "throughput": throughput},
+        "result": result,
+    }
+
+
 class WebhookEvent(BaseModel):
     stage: str
     queue_size: float
@@ -1004,6 +1146,38 @@ async def receive_webhook(payload: WebhookPayload):
         supabase.table("workflow_metrics").insert({"industry": industry, "stage": event.stage, "queue_size": event.queue_size, "processing_time_seconds": event.processing_time_seconds, "throughput": event.throughput, "health_score": round(health, 1)}).execute()
         if violations:
             severity = "high" if len(violations) >= 2 else "medium"
-            inc = supabase.table("incidents").insert({"stage": event.stage, "severity": severity, "description": ". ".join(violations), "status": "open", "industry": industry}).execute()
-            if inc.data: created.append(inc.data[0])
+            # Alert correlation — check for existing open incident in last 30 min
+            cutoff = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
+            existing = supabase.table("incidents").select("id, description").eq(
+                "industry", industry
+            ).eq("stage", event.stage).eq("status", "open").gte(
+                "created_at", cutoff
+            ).limit(1).execute()
+
+            if existing.data:
+                # Update existing incident instead of creating duplicate
+                existing_id = existing.data[0]["id"]
+                supabase.table("incidents").update({
+                    "description": existing.data[0]["description"] + " [Updated: " + ". ".join(violations) + "]"
+                }).eq("id", existing_id).execute()
+            else:
+                # Create new incident
+                inc = supabase.table("incidents").insert({
+                    "stage": event.stage,
+                    "severity": severity,
+                    "description": ". ".join(violations),
+                    "status": "open",
+                    "industry": industry,
+                }).execute()
+                if inc.data:
+                    created.append(inc.data[0])
+                    # Slack alert for new HIGH incidents
+                    if severity == "high":
+                        await send_slack_alert(
+                            stage=event.stage,
+                            severity=severity,
+                            description=". ".join(violations),
+                            industry=industry,
+                            health=round(health, 1),
+                        )
     return {"received": len(payload.events), "incidents_created": len(created)}
