@@ -1416,6 +1416,46 @@ export default function Home() {
               </div>
             </section>
             <section>
+              <h3 className="text-sm font-semibold text-indigo-400 uppercase tracking-wider mb-3">Additional Features</h3>
+              <div className="space-y-2">
+                {[
+                  {
+                    icon: '📁',
+                    title: 'File Upload with AI Column Mapping',
+                    desc: 'Upload any Excel or CSV file — Groq automatically identifies which of your columns map to stage, queue size, processing time, and throughput. Your file does not need to be formatted in any specific way.'
+                  },
+                  {
+                    icon: '💬',
+                    title: 'Community Suggestions',
+                    desc: 'Built-in feedback system on the dashboard. Anyone can submit improvement ideas, new industry requests, or bug reports. All suggestions are visible to everyone in real time.'
+                  },
+                  {
+                    icon: '🔔',
+                    title: 'Email Alerts',
+                    desc: 'HIGH severity incidents and new community suggestions trigger instant email notifications via Resend — so critical issues and new ideas are never missed.'
+                  },
+                  {
+                    icon: '🔗',
+                    title: 'Webhook Ingestion',
+                    desc: 'POST /webhook/events accepts live operational data from any external system. Automatically creates incidents and triggers AI analysis for HIGH severity events — no manual input needed.'
+                  },
+                  {
+                    icon: '📋',
+                    title: 'Audit Trail',
+                    desc: 'Every AI analysis, agent investigation, and resolution outcome is logged with timestamps and stored in Supabase — giving a full history of what was detected, analyzed, and actioned.'
+                  },
+                ].map(f => (
+                  <div key={f.title} className="flex gap-3 p-3 rounded-lg bg-gray-800 border border-gray-700">
+                    <span className="text-lg shrink-0">{f.icon}</span>
+                    <div>
+                      <p className="text-xs font-semibold text-white mb-0.5">{f.title}</p>
+                      <p className="text-xs text-gray-400 leading-relaxed">{f.desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+            <section>
               <h3 className="text-sm font-semibold text-indigo-400 uppercase tracking-wider mb-3">Tech Stack</h3>
               <div className="grid grid-cols-2 gap-2 text-xs">
                 {[{label:'Frontend',value:'Next.js 16 + TypeScript + Tailwind'},{label:'Backend',value:'FastAPI (Python) on Render'},{label:'Database',value:'Supabase (PostgreSQL)'},{label:'AI — Production',value:'Groq llama-3.3-70b-versatile'},{label:'AI — Local Dev',value:'Ollama + llama3.2'},{label:'Agent',value:'Groq native tool-calling API'},{label:'Frontend Hosting',value:'Vercel (auto-deploy)'},{label:'Version Control',value:'GitHub'}].map(t => (
