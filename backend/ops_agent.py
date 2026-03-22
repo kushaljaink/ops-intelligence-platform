@@ -219,41 +219,18 @@ def build_agent_tools(supabase: Client, groq_api_key: str, industry: str):
 
 
 def build_agent(supabase: Client, groq_api_key: str, industry: str) -> AgentExecutor:
-    """Build and return the LangChain agent executor."""
     llm = ChatGroq(
         model="llama-3.3-70b-versatile",
         api_key=groq_api_key,
         temperature=0,
         max_tokens=1000,
     )
-
     tools = build_agent_tools(supabase, groq_api_key, industry)
-
     prompt = ChatPromptTemplate.from_messages([
-        ("system", f"""You are an AI operations intelligence agent investigating a {industry} operation.
-
-Your job is to systematically investigate the current operational state and identify the most critical issues.
-
-INVESTIGATION APPROACH:
-1. Always start by checking health scores to get an overview
-2. Check for cascade risks and open incidents
-3. For any critical or severe stage, check its recurring patterns and ETA to breach
-4. If a stage is clearly critical and recurring, note it needs a playbook
-5. Prioritize your findings by urgency
-
-IMPORTANT CONSTRAINTS:
-- You are an investigator, not an actor — you gather information and make recommendations
-- Be specific: use actual stage names, health scores, and numbers in your findings
-- After gathering information, produce a structured investigation report
-- Clearly flag which issues are CRITICAL vs WARNING vs INFORMATIONAL
-- Always end with a prioritized action list for the ops team
-
-Keep your tool calls focused. Don't repeat the same tool twice."""),
-        MessagesPlaceholder(variable_name="chat_history", optional=True),
+        ("system", f"""You are an AI operations intelligence agent investigating a {industry} operation. Check health scores first, then cascade risks and open incidents. For critical stages check patterns and ETA. Prioritize findings by urgency and end with a prioritized action list."""),
         ("human", "{input}"),
-        MessagesPlaceholder(variable_name="agent_scratchpad"),
+        ("placeholder", "{agent_scratchpad}"),
     ])
-
     agent = create_tool_calling_agent(llm, tools, prompt)
     return AgentExecutor(agent=agent, tools=tools, verbose=True, max_iterations=8, return_intermediate_steps=True)
 
