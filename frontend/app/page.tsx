@@ -409,7 +409,7 @@ export default function Home() {
     { key: 'whatif', label: 'What-If Simulation' },
     { key: 'effectiveness', label: 'Resolution Effectiveness' },
     { key: 'playbook', label: 'Playbook Generator' },
-    { key: 'agent', label: '🤖 AI Agent' },
+    { key: 'agent', label: '🤖 AI Agent', highlight: true },
   ] as const
 
   return (
@@ -482,9 +482,9 @@ export default function Home() {
 
           <div className="flex border-b border-gray-800 px-2 overflow-x-auto">
             {intelTabs.map(tab => (
-              <button key={tab.key} onClick={() => setActiveIntelTab(tab.key)} className={`px-3 py-3 text-xs font-medium border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 ${activeIntelTab === tab.key ? 'border-indigo-500 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'}`}>
+              <button key={tab.key} onClick={() => setActiveIntelTab(tab.key)} className={`px-3 py-3 text-xs font-medium border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 ${ activeIntelTab === tab.key ? 'border-indigo-500 text-white' : 'highlight' in tab && tab.highlight ? 'border-transparent text-indigo-400 hover:text-indigo-300 font-semibold' : 'border-transparent text-gray-500 hover:text-gray-300' }`}>
                 {tab.label}
-                {'badge' in tab && tab.badge > 0 && <span className={`text-xs px-1.5 py-0.5 rounded-full text-white ${tab.badgeColor}`}>{tab.badge}</span>}
+                {'badge' in tab && tab.badge > 0 && <span className={`text-xs px-1.5 py-0.5 rounded-full text-white ${'badgeColor' in tab ? tab.badgeColor : 'bg-gray-500'}`}>{tab.badge}</span>}
               </button>
             ))}
           </div>
@@ -680,7 +680,7 @@ export default function Home() {
             {activeIntelTab === 'agent' && (
               <div>
                 <div className="mb-6">
-                  <div className="flex items-start gap-3 p-4 rounded-xl bg-indigo-500/5 border border-indigo-500/20 mb-4">
+                  <div className="flex items-start gap-3 p-4 rounded-xl bg-indigo-500/10 border border-indigo-500/40 mb-4 shadow-sm shadow-indigo-500/10">
                     <div className="text-2xl">🤖</div>
                     <div>
                       <p className="text-sm font-semibold text-white mb-1">AI Investigation Agent</p>
@@ -697,7 +697,7 @@ export default function Home() {
                     <button
                       onClick={runAgent}
                       disabled={agentRunning}
-                      className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition-colors whitespace-nowrap"
+                      className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition-colors whitespace-nowrap shadow-lg shadow-indigo-500/30"
                     >
                       {agentRunning ? (
                         <><svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" /></svg>Investigating…</>
