@@ -563,6 +563,7 @@ async def analyze_incident(incident_id: str):
     logger.info("Analyze incident requested for incident_id=%s", incident_id)
     result = supabase.table("incidents").select("*").eq("id", incident_id).single().execute()
     if not result.data:
+        logger.warning("Analyze incident could not find incident_id=%s", incident_id)
         raise HTTPException(status_code=404, detail="Incident not found")
     incident = result.data
     industry = incident.get("industry", "operations")
@@ -602,7 +603,15 @@ async def analyze_incident(incident_id: str):
         f"Recommended action style for this stage: {get_stage_specific_actions(industry, incident.get('stage', ''))}\n"
         f"No generic advice. Use actual numbers."
     )
-    analysis = await call_groq(prompt)
+    logger.info("Analyze incident calling AI provider for incident_id=%s industry=%s stage=%s", incident_id, industry, incident.get("stage"))
+    try:
+        analysis = await call_groq(prompt)
+    except HTTPException:
+        logger.exception("Analyze incident AI provider failure for incident_id=%s", incident_id)
+        raise
+    except Exception:
+        logger.exception("Analyze incident unexpected AI failure for incident_id=%s", incident_id)
+        raise HTTPException(status_code=500, detail="Backend analysis failed")
     confidence_score, confidence_reason = extract_confidence(analysis)
     supabase.table("analysis_logs").insert({"incident_id": incident_id, "ai_analysis": analysis, "triggered_by": "user", "confidence_score": confidence_score, "confidence_reason": confidence_reason}).execute()
     if is_elevated_severity(incident.get("severity", "")):
@@ -615,6 +624,7 @@ async def analyze_incident(incident_id: str):
             industry=industry,
             health=latest_health,
         )
+    logger.info("Analyze incident succeeded for incident_id=%s confidence=%s", incident_id, confidence_score)
     return {"success": True, "incident_id": incident_id, "stage": incident.get("stage"), "severity": incident.get("severity"), "ai_analysis": analysis, "confidence_score": confidence_score, "confidence_reason": confidence_reason}
 
 

@@ -578,9 +578,12 @@ export default function Home() {
   const analyzeIncident = async (id: string) => {
     setAnalyses(prev => ({ ...prev, [id]: { loading: true, result: null, error: null, rateLimit: false } }))
     try {
-      const r = await fetch(`${BACKEND}/analyze-incident/${id}`, { method: 'POST' })
+      const requestUrl = `${BACKEND}/analyze-incident/${id}`
+      console.debug('[Analyze with AI] request', { url: requestUrl, method: 'POST', incidentId: id })
+      const r = await fetch(requestUrl, { method: 'POST' })
       const d = await r.json().catch(() => null)
-      if (r.status === 429 || d.detail?.startsWith('GROQ_RATE_LIMIT')) { setAnalyses(prev => ({ ...prev, [id]: { loading: false, result: null, error: null, rateLimit: true } })); return }
+      console.debug('[Analyze with AI] response', { status: r.status, ok: r.ok, body: d })
+      if (r.status === 429 || d?.detail?.startsWith('GROQ_RATE_LIMIT')) { setAnalyses(prev => ({ ...prev, [id]: { loading: false, result: null, error: null, rateLimit: true } })); return }
       if (!r.ok) throw new Error(d?.error || d?.detail || `HTTP ${r.status}`)
       if (!d?.success && !d?.ai_analysis) throw new Error(d?.error || 'Backend analysis failed')
       setAnalyses(prev => ({ ...prev, [id]: { loading: false, result: d.ai_analysis, error: null, rateLimit: false, confidence: d.confidence_score, confidenceReason: d.confidence_reason } }))
