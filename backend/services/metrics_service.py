@@ -1,12 +1,13 @@
-import os
-from datetime import datetime
 import logging
+import os
+from datetime import datetime, timezone
 
 from supabase import Client, create_client
 
 
 _supabase: Client | None = None
 logger = logging.getLogger(__name__)
+
 CORE_METRIC_NAMES = (
     "active_sessions",
     "incidents_analyzed",
@@ -15,7 +16,7 @@ CORE_METRIC_NAMES = (
     "live_data_refresh_calls",
     "industries_explored",
 )
-FALLBACK_METRICS_INDUSTRY = "__platform_metrics__"
+METRICS_INDUSTRY = "__platform_metrics__"
 
 
 def _get_supabase() -> Client:
@@ -25,76 +26,56 @@ def _get_supabase() -> Client:
     return _supabase
 
 
-def _is_missing_table_error(error: Exception) -> bool:
-    return "platform_metrics" in str(error).lower() and "not found" in str(error).lower()
+def _today_metric_name() -> str:
+    return f"visitors_today_{datetime.now(timezone.utc).strftime('%Y%m%d')}"
 
 
-def _log_metrics_error(action: str, error: Exception, metric_name: str | None = None) -> None:
-    metric_hint = f" for '{metric_name}'" if metric_name else ""
-    logger.exception("Platform metrics %s failed%s", action, metric_hint)
-    if _is_missing_table_error(error):
-        logger.error("The 'platform_metrics' table appears to be missing. Apply platform_metrics.sql in Supabase.")
+def _normalize_metric_value(value: int) -> int:
+    return max(0, int(value))
 
 
-def _log_fallback_usage(action: str, metric_name: str | None = None) -> None:
-    metric_hint = f" for '{metric_name}'" if metric_name else ""
-    logger.warning("Using workflow_metrics fallback for platform metrics %s%s", action, metric_hint)
-
-
-def _get_fallback_metric_value(metric_name: str, initial_value: int = 0) -> int:
-    supabase = _get_supabase()
-    response = (
-        supabase.table("workflow_metrics")
-        .select("queue_size")
-        .eq("industry", FALLBACK_METRICS_INDUSTRY)
-        .eq("stage", metric_name)
-        .order("recorded_at", desc=True)
-        .limit(1)
-        .execute()
-    )
-    if response.data:
-        return int(response.data[0].get("queue_size", initial_value) or initial_value)
-    return initial_value
-
-
-def _set_fallback_metric_value(metric_name: str, value: int) -> int:
-    supabase = _get_supabase()
-    safe_value = max(0, value)
-    existing = (
-        supabase.table("workflow_metrics")
-        .select("stage")
-        .eq("industry", FALLBACK_METRICS_INDUSTRY)
-        .eq("stage", metric_name)
-        .limit(1)
-        .execute()
-    )
-    payload = {
-        "industry": FALLBACK_METRICS_INDUSTRY,
+def _metric_payload(metric_name: str, metric_value: int) -> dict:
+    safe_value = _normalize_metric_value(metric_value)
+    return {
+        "industry": METRICS_INDUSTRY,
         "stage": metric_name,
         "queue_size": safe_value,
         "processing_time_seconds": 0,
         "throughput": 0,
         "health_score": min(100, safe_value),
     }
+
+
+def _set_metric_value(metric_name: str, metric_value: int) -> int:
+    supabase = _get_supabase()
+    payload = _metric_payload(metric_name, metric_value)
+    existing = (
+        supabase.table("workflow_metrics")
+        .select("id")
+        .eq("industry", METRICS_INDUSTRY)
+        .eq("stage", metric_name)
+        .limit(1)
+        .execute()
+    )
     if existing.data:
         (
             supabase.table("workflow_metrics")
             .update(payload)
-            .eq("industry", FALLBACK_METRICS_INDUSTRY)
+            .eq("industry", METRICS_INDUSTRY)
             .eq("stage", metric_name)
             .execute()
         )
     else:
         supabase.table("workflow_metrics").insert(payload).execute()
-    return safe_value
+    return payload["queue_size"]
 
 
-def _get_fallback_metric_map() -> dict[str, int]:
+def _get_metric_map() -> dict[str, int]:
     supabase = _get_supabase()
     response = (
         supabase.table("workflow_metrics")
         .select("stage, queue_size, recorded_at")
-        .eq("industry", FALLBACK_METRICS_INDUSTRY)
+        .eq("industry", METRICS_INDUSTRY)
         .order("recorded_at", desc=True)
         .execute()
     )
@@ -103,81 +84,41 @@ def _get_fallback_metric_map() -> dict[str, int]:
         stage = row.get("stage")
         if not stage or stage in metric_map:
             continue
-        metric_map[stage] = int(row.get("queue_size", 0) or 0)
+        metric_map[stage] = _normalize_metric_value(row.get("queue_size", 0) or 0)
     return metric_map
 
 
-def _upsert_metric(metric_name: str, metric_value: int) -> None:
-    supabase = _get_supabase()
-    supabase.table("platform_metrics").upsert(
-        {
-            "metric_name": metric_name,
-            "metric_value": max(0, metric_value),
-            "updated_at": datetime.utcnow().isoformat(),
-        },
-        on_conflict="metric_name",
-    ).execute()
+def _ensure_metric(metric_name: str, initial_value: int = 0) -> int:
+    metric_map = _get_metric_map()
+    if metric_name in metric_map:
+        return metric_map[metric_name]
+    return _set_metric_value(metric_name, initial_value)
 
 
 def _ensure_core_metrics() -> None:
     for metric_name in (*CORE_METRIC_NAMES, _today_metric_name()):
-        _upsert_metric(metric_name, 0)
-
-
-def _ensure_metric(metric_name: str, initial_value: int = 0) -> int:
-    try:
-        supabase = _get_supabase()
-        response = supabase.table("platform_metrics").select("id, metric_value").eq("metric_name", metric_name).limit(1).execute()
-        if response.data:
-            return int(response.data[0].get("metric_value", initial_value) or initial_value)
-
-        _upsert_metric(metric_name, initial_value)
-        return initial_value
-    except Exception as error:
-        _log_metrics_error("ensure", error, metric_name)
-        _log_fallback_usage("ensure", metric_name)
-        return _set_fallback_metric_value(metric_name, _get_fallback_metric_value(metric_name, initial_value))
+        _ensure_metric(metric_name, 0)
 
 
 def increment_metric(metric_name: str, amount: int = 1) -> int:
     try:
-        supabase = _get_supabase()
         current_value = _ensure_metric(metric_name, 0)
-        new_value = max(0, current_value + amount)
-        supabase.table("platform_metrics").update({
-            "metric_value": new_value,
-            "updated_at": datetime.utcnow().isoformat(),
-        }).eq("metric_name", metric_name).execute()
-        return new_value
-    except Exception as error:
-        _log_metrics_error("increment", error, metric_name)
-        _log_fallback_usage("increment", metric_name)
-        current_value = _get_fallback_metric_value(metric_name, 0)
-        return _set_fallback_metric_value(metric_name, current_value + amount)
+        return _set_metric_value(metric_name, current_value + amount)
+    except Exception:
+        logger.exception("Platform metrics increment failed for '%s'", metric_name)
+        raise
 
 
 def set_metric(metric_name: str, value: int) -> int:
     try:
-        supabase = _get_supabase()
-        _ensure_metric(metric_name, 0)
-        safe_value = max(0, value)
-        supabase.table("platform_metrics").update({
-            "metric_value": safe_value,
-            "updated_at": datetime.utcnow().isoformat(),
-        }).eq("metric_name", metric_name).execute()
-        return safe_value
-    except Exception as error:
-        _log_metrics_error("set", error, metric_name)
-        _log_fallback_usage("set", metric_name)
-        return _set_fallback_metric_value(metric_name, value)
+        return _set_metric_value(metric_name, value)
+    except Exception:
+        logger.exception("Platform metrics set failed for '%s'", metric_name)
+        raise
 
 
 def get_metric_value(metric_name: str) -> int:
     return _ensure_metric(metric_name, 0)
-
-
-def _today_metric_name() -> str:
-    return f"visitors_today_{datetime.utcnow().strftime('%Y%m%d')}"
 
 
 def record_visitor_session_start() -> dict:
@@ -207,25 +148,21 @@ def record_industry_selection(industry: str) -> dict:
 
 def get_metrics_snapshot() -> dict:
     try:
-        supabase = _get_supabase()
         _ensure_core_metrics()
-        response = supabase.table("platform_metrics").select("metric_name, metric_value").execute()
-        rows = response.data or []
-        metric_map = {row["metric_name"]: int(row.get("metric_value", 0) or 0) for row in rows}
-    except Exception as error:
-        _log_metrics_error("snapshot", error)
-        _log_fallback_usage("snapshot")
-        for metric_name in (*CORE_METRIC_NAMES, _today_metric_name()):
-            _set_fallback_metric_value(metric_name, _get_fallback_metric_value(metric_name, 0))
-        metric_map = _get_fallback_metric_map()
+        metric_map = _get_metric_map()
+    except Exception:
+        logger.exception("Platform metrics snapshot failed")
+        raise
 
     top_industries = []
     for metric_name, metric_value in metric_map.items():
         if metric_name.startswith("industry_selected_"):
-            top_industries.append({
-                "industry": metric_name.removeprefix("industry_selected_"),
-                "count": metric_value,
-            })
+            top_industries.append(
+                {
+                    "industry": metric_name.removeprefix("industry_selected_"),
+                    "count": metric_value,
+                }
+            )
     top_industries.sort(key=lambda item: item["count"], reverse=True)
 
     return {

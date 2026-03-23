@@ -459,7 +459,7 @@ def get_platform_metrics():
         return get_metrics_snapshot()
     except Exception:
         logger.exception("Failed to load platform metrics snapshot")
-        raise HTTPException(status_code=503, detail="Platform metrics are unavailable. Confirm platform_metrics.sql has been applied.")
+        raise HTTPException(status_code=503, detail="Platform metrics are unavailable. Confirm workflow_metrics is reachable and backend env vars are set.")
 
 
 @app.post("/platform-metrics/session-start")
@@ -468,7 +468,7 @@ def track_platform_session_start():
         return {"success": True, **record_visitor_session_start()}
     except Exception:
         logger.exception("Failed to record platform session start")
-        raise HTTPException(status_code=503, detail="Platform metrics are unavailable. Confirm platform_metrics.sql has been applied.")
+        raise HTTPException(status_code=503, detail="Platform metrics are unavailable. Confirm workflow_metrics is reachable and backend env vars are set.")
 
 
 @app.post("/platform-metrics/session-end")
@@ -477,7 +477,7 @@ def track_platform_session_end():
         return {"success": True, "active_sessions": record_visitor_session_end()}
     except Exception:
         logger.exception("Failed to record platform session end")
-        raise HTTPException(status_code=503, detail="Platform metrics are unavailable. Confirm platform_metrics.sql has been applied.")
+        raise HTTPException(status_code=503, detail="Platform metrics are unavailable. Confirm workflow_metrics is reachable and backend env vars are set.")
 
 
 @app.post("/platform-metrics/industry-selection")
@@ -486,7 +486,7 @@ def track_platform_industry_selection(industry: str = "cruise"):
         return {"success": True, **record_industry_selection(industry)}
     except Exception:
         logger.exception("Failed to record platform industry selection for %s", industry)
-        raise HTTPException(status_code=503, detail="Platform metrics are unavailable. Confirm platform_metrics.sql has been applied.")
+        raise HTTPException(status_code=503, detail="Platform metrics are unavailable. Confirm workflow_metrics is reachable and backend env vars are set.")
 
 
 @app.get("/auth/me")
