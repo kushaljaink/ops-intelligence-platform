@@ -79,6 +79,17 @@ type LiveFetchState = {
   fetchedAt?: string
 }
 
+type PlatformMetricsSnapshot = {
+  visitors_today: number
+  active_sessions: number
+  incidents_analyzed: number
+  agent_investigations: number
+  webhook_events_received: number
+  live_data_refresh_calls: number
+  industries_explored: number
+  top_industries_explored: { industry: string; count: number }[]
+}
+
 const BACKEND = 'https://ops-intelligence-platform.onrender.com'
 const LIVE_DATA_INDUSTRIES = ['healthcare', 'airport', 'energy', 'water', 'weather'] as const
 const INDUSTRY_DATA_MODES: Record<string, 'hybrid' | 'demo'> = {
@@ -172,6 +183,47 @@ const WHATIF_CHANGES = [
   { value: 'extend_hours', label: 'Extend Hours' },
 ]
 
+function PlatformAnalyticsPanel({ metrics, loading }: { metrics: PlatformMetricsSnapshot | null; loading: boolean }) {
+  const items = [
+    { label: 'Visitors today', value: metrics?.visitors_today ?? 0 },
+    { label: 'Active sessions', value: metrics?.active_sessions ?? 0 },
+    { label: 'Incidents analyzed', value: metrics?.incidents_analyzed ?? 0 },
+    { label: 'Agent investigations', value: metrics?.agent_investigations ?? 0 },
+    { label: 'Webhook events received', value: metrics?.webhook_events_received ?? 0 },
+    { label: 'Live refresh calls', value: metrics?.live_data_refresh_calls ?? 0 },
+  ]
+
+  return (
+    <div className="mt-10 rounded-2xl border border-gray-800 bg-gray-900/70 px-5 py-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-gray-500">Platform Analytics</p>
+          <p className="mt-1 text-sm text-gray-400">Public telemetry from the live demo surface.</p>
+        </div>
+        <p className="text-xs text-gray-600">{loading ? 'Refreshing…' : 'Auto-updated from backend usage counters'}</p>
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        {items.map(item => (
+          <div key={item.label} className="rounded-xl border border-gray-800 bg-gray-950/60 px-3 py-3">
+            <p className="text-[11px] uppercase tracking-wide text-gray-500">{item.label}</p>
+            <p className="mt-1 text-lg font-semibold text-gray-100">{item.value.toLocaleString()}</p>
+          </div>
+        ))}
+      </div>
+      {metrics && metrics.top_industries_explored.length > 0 && (
+        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+          <span className="uppercase tracking-wide text-gray-600">Top industries explored</span>
+          {metrics.top_industries_explored.map(item => (
+            <span key={item.industry} className="rounded-full border border-gray-700 bg-gray-950/70 px-2.5 py-1 text-gray-300">
+              {item.industry.replace(/_/g, ' ')} · {item.count}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 const CONSTRUCTION_STAGE_LABELS: Record<string, string> = {
   permits_approvals: 'Permits & Approvals',
   site_prep: 'Site Prep',
@@ -237,6 +289,8 @@ export default function Home() {
   const [intelLoading, setIntelLoading] = useState(false)
   const [activeIntelTab, setActiveIntelTab] = useState<'health' | 'patterns' | 'cascade' | 'anomaly' | 'eta' | 'forecast' | 'whatif' | 'effectiveness' | 'playbook'>('health')
   const [liveFetchState, setLiveFetchState] = useState<LiveFetchState>({ status: 'demo', message: 'Demo data active' })
+  const [platformMetrics, setPlatformMetrics] = useState<PlatformMetricsSnapshot | null>(null)
+  const [platformMetricsLoading, setPlatformMetricsLoading] = useState(true)
 
   // What-if
   const [whatIfStage, setWhatIfStage] = useState('')
@@ -336,6 +390,20 @@ export default function Home() {
     }
   }, [buildFetchOptions])
 
+  const fetchPlatformMetrics = useCallback(async () => {
+    setPlatformMetricsLoading(true)
+    try {
+      const response = await fetch(`${BACKEND}/platform-metrics`)
+      const payload = await response.json()
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      setPlatformMetrics(payload)
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setPlatformMetricsLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     // Auth listener
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -348,6 +416,66 @@ export default function Home() {
     })
     return () => subscription.unsubscribe()
   }, [])
+
+  useEffect(() => {
+    const sessionStorageKey = 'ops-platform-session-active'
+    const alreadyTracked = typeof window !== 'undefined' ? window.sessionStorage.getItem(sessionStorageKey) : null
+
+    const startSession = async () => {
+      if (alreadyTracked) {
+        fetchPlatformMetrics()
+        return
+      }
+
+      try {
+        await fetch(`${BACKEND}/platform-metrics/session-start`, { method: 'POST' })
+        window.sessionStorage.setItem(sessionStorageKey, '1')
+      } catch (err) {
+        console.error(err)
+      } finally {
+        fetchPlatformMetrics()
+      }
+    }
+
+    const endSession = () => {
+      if (typeof window === 'undefined' || !window.sessionStorage.getItem(sessionStorageKey)) return
+      window.sessionStorage.removeItem(sessionStorageKey)
+      const url = `${BACKEND}/platform-metrics/session-end`
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon(url, new Blob([], { type: 'application/json' }))
+        return
+      }
+      fetch(url, { method: 'POST', keepalive: true }).catch(() => undefined)
+    }
+
+    startSession()
+    window.addEventListener('pagehide', endSession)
+
+    return () => {
+      window.removeEventListener('pagehide', endSession)
+    }
+  }, [fetchPlatformMetrics])
+
+  useEffect(() => {
+    const controller = new AbortController()
+
+    const trackIndustrySelection = async () => {
+      try {
+        await fetch(`${BACKEND}/platform-metrics/industry-selection?industry=${encodeURIComponent(industryValue)}`, {
+          method: 'POST',
+          signal: controller.signal,
+        })
+        fetchPlatformMetrics()
+      } catch (err) {
+        if ((err as Error).name !== 'AbortError') {
+          console.error(err)
+        }
+      }
+    }
+
+    trackIndustrySelection()
+    return () => controller.abort()
+  }, [fetchPlatformMetrics, industryValue])
 
   useEffect(() => {
     let cancelled = false
@@ -396,6 +524,7 @@ export default function Home() {
           sourceSystems: result?.source_systems ?? [],
           fetchedAt: result?.fetched_at,
         })
+        fetchPlatformMetrics()
 
         await Promise.all([
           fetchData(industryValue),
@@ -421,7 +550,7 @@ export default function Home() {
     return () => {
       cancelled = true
     }
-  }, [fetchData, industryDataMode, industryValue])
+  }, [fetchData, fetchPlatformMetrics, industryDataMode, industryValue])
 
   const analyzeIncident = async (id: string) => {
     setAnalyses(prev => ({ ...prev, [id]: { loading: true, result: null, error: null, rateLimit: false } }))
@@ -431,6 +560,7 @@ export default function Home() {
       if (r.status === 429 || d.detail?.startsWith('GROQ_RATE_LIMIT')) { setAnalyses(prev => ({ ...prev, [id]: { loading: false, result: null, error: null, rateLimit: true } })); return }
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       setAnalyses(prev => ({ ...prev, [id]: { loading: false, result: d.ai_analysis, error: null, rateLimit: false, confidence: d.confidence_score, confidenceReason: d.confidence_reason } }))
+      fetchPlatformMetrics()
     } catch (err: unknown) {
       setAnalyses(prev => ({ ...prev, [id]: { loading: false, result: null, error: err instanceof Error ? err.message : 'Unknown error', rateLimit: false } }))
     }
@@ -520,6 +650,7 @@ export default function Home() {
       if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`)
       if (!d.success) throw new Error(d.error || 'Investigation failed')
       setAgentResult(d)
+      fetchPlatformMetrics()
     } catch (e: unknown) {
       setAgentError(e instanceof Error ? e.message : 'Unknown error')
     } finally {
@@ -663,6 +794,7 @@ export default function Home() {
       const d = await r.json()
       if (d.success) {
         setTestResult(`✓ ${d.message}. Refresh the page to see the new incident.`)
+        fetchPlatformMetrics()
         fetchData(industryValue)
       } else {
         setTestResult('Test failed. Check backend logs.')
@@ -1661,6 +1793,10 @@ export default function Home() {
             ))}
           </div>
         </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto">
+        <PlatformAnalyticsPanel metrics={platformMetrics} loading={platformMetricsLoading} />
       </div>
     </main>
 

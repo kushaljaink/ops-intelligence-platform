@@ -14,6 +14,13 @@ from supabase import create_client
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 from services.live_data_service import fetch_live_incident_bundle, SUPPORTED_LIVE_INDUSTRIES
+from services.metrics_service import (
+    get_metrics_snapshot,
+    increment_metric,
+    record_industry_selection,
+    record_visitor_session_end,
+    record_visitor_session_start,
+)
 
 load_dotenv()
 
@@ -310,6 +317,26 @@ def health():
     return {"status": "ok", "service": "Ops Intelligence Platform"}
 
 
+@app.get("/platform-metrics")
+def get_platform_metrics():
+    return get_metrics_snapshot()
+
+
+@app.post("/platform-metrics/session-start")
+def track_platform_session_start():
+    return {"success": True, **record_visitor_session_start()}
+
+
+@app.post("/platform-metrics/session-end")
+def track_platform_session_end():
+    return {"success": True, "active_sessions": record_visitor_session_end()}
+
+
+@app.post("/platform-metrics/industry-selection")
+def track_platform_industry_selection(industry: str = "cruise"):
+    return {"success": True, **record_industry_selection(industry)}
+
+
 @app.get("/auth/me")
 def get_me(request: Request):
     user_id = get_user_id(request)
@@ -380,6 +407,7 @@ def get_workflow_events():
 
 @app.post("/analyze-incident/{incident_id}")
 async def analyze_incident(incident_id: str):
+    increment_metric("incidents_analyzed")
     result = supabase.table("incidents").select("*").eq("id", incident_id).single().execute()
     if not result.data:
         raise HTTPException(status_code=404, detail="Incident not found")
@@ -838,6 +866,7 @@ async def agent_investigate(body: AgentInvestigateRequest):
     """Run agent investigation with inline execution — no module import to avoid cache issues."""
     import json as _json
 
+    increment_metric("agent_investigations")
     industry = body.industry
     goal = body.goal or f"Investigate the {industry} operation. Check health scores, open incidents, cascade risks, ETAs, and patterns for any critical stages. Provide a prioritized action plan."
 
@@ -1274,6 +1303,7 @@ def get_suggestions():
 
 @app.post("/fetch-live-data")
 async def fetch_live_data(industry: str = "all"):
+    increment_metric("live_data_refresh_calls")
     bundle = await fetch_live_incident_bundle(industry)
     results = {}
     all_incidents = []
@@ -1457,6 +1487,7 @@ class WebhookPayload(BaseModel):
 
 @app.post("/webhook/events")
 async def receive_webhook(payload: WebhookPayload):
+    increment_metric("webhook_events_received")
     if WEBHOOK_SECRET and payload.secret != WEBHOOK_SECRET:
         raise HTTPException(status_code=401, detail="Invalid secret")
     # Resolve user from API key
