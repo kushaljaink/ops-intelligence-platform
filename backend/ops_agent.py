@@ -311,14 +311,23 @@ For construction, emphasize permit delays, inspection backlog, blocked downstrea
 
                 response.raise_for_status()
                 data = response.json()
+                if not isinstance(data, dict):
+                    logger.error("Agent investigation received non-dict response for %s: %r", industry, data)
+                    return {"success": False, "error": "AI provider returned an invalid response.", "reason": "backend", "industry": industry, "steps": parsed_steps, "output": "", "decision_points": [], "investigated_at": datetime.now(timezone.utc).isoformat()}
 
                 choices = data.get("choices") or []
                 if not choices:
                     output = "Agent received an empty response. Please try again."
                     break
 
-                choice = choices[0]
+                choice = choices[0] or {}
+                if not isinstance(choice, dict):
+                    logger.error("Agent investigation received invalid choice for %s: %r", industry, choice)
+                    return {"success": False, "error": "AI provider returned an invalid choice payload.", "reason": "backend", "industry": industry, "steps": parsed_steps, "output": "", "decision_points": [], "investigated_at": datetime.now(timezone.utc).isoformat()}
                 message = choice.get("message") or {}
+                if not isinstance(message, dict):
+                    logger.error("Agent investigation received invalid message for %s: %r", industry, message)
+                    return {"success": False, "error": "AI provider returned an invalid message payload.", "reason": "backend", "industry": industry, "steps": parsed_steps, "output": "", "decision_points": [], "investigated_at": datetime.now(timezone.utc).isoformat()}
                 messages.append(message)
 
                 tool_calls = message.get("tool_calls") or []
@@ -327,7 +336,13 @@ For construction, emphasize permit delays, inspection backlog, blocked downstrea
                     break
 
                 for tool_call in tool_calls:
+                    if not isinstance(tool_call, dict):
+                        logger.warning("Skipping invalid tool call for %s: %r", industry, tool_call)
+                        continue
                     fn = tool_call.get("function") or {}
+                    if not isinstance(fn, dict):
+                        logger.warning("Skipping invalid function payload for %s: %r", industry, fn)
+                        continue
                     tool_name = fn.get("name", "")
                     try:
                         tool_args = json.loads(fn.get("arguments") or "{}")

@@ -1252,18 +1252,37 @@ For construction, emphasize permit delays, inspection backlog, blocked downstrea
                     raise HTTPException(status_code=429, detail="GROQ_RATE_LIMIT: Rate limited. Wait 60 seconds.")
                 resp.raise_for_status()
                 data = resp.json()
+                if not isinstance(data, dict):
+                    logger.error("Legacy agent investigation received non-dict response for industry=%s: %r", industry, data)
+                    output = "AI provider returned an invalid response. Please try again."
+                    break
                 choices = data.get("choices") or []
                 if not choices:
                     output = "Empty response from AI. Try again."
                     break
-                message = choices[0].get("message") or {}
+                choice = choices[0] or {}
+                if not isinstance(choice, dict):
+                    logger.error("Legacy agent investigation received invalid choice for industry=%s: %r", industry, choice)
+                    output = "AI provider returned an invalid choice payload. Please try again."
+                    break
+                message = choice.get("message") or {}
+                if not isinstance(message, dict):
+                    logger.error("Legacy agent investigation received invalid message for industry=%s: %r", industry, message)
+                    output = "AI provider returned an invalid message payload. Please try again."
+                    break
                 messages.append(message)
                 tool_calls = message.get("tool_calls") or []
                 if not tool_calls:
                     output = message.get("content") or "Investigation complete."
                     break
                 for tc in tool_calls:
+                    if not isinstance(tc, dict):
+                        logger.warning("Skipping invalid legacy tool call for industry=%s: %r", industry, tc)
+                        continue
                     fn = tc.get("function") or {}
+                    if not isinstance(fn, dict):
+                        logger.warning("Skipping invalid legacy function payload for industry=%s: %r", industry, fn)
+                        continue
                     tn = fn.get("name", "")
                     try:
                         ta = _json.loads(fn.get("arguments") or "{}")
