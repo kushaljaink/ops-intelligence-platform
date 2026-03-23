@@ -69,6 +69,14 @@ type AgentResult = {
   error?: string
 } | null
 
+type CopilotResult = {
+  success: boolean
+  answer: string
+  confidence: number
+  sources: string[]
+  suggested_followups: string[]
+} | null
+
 type LiveFetchState = {
   status: 'idle' | 'loading' | 'live' | 'fallback' | 'demo'
   message: string
@@ -189,6 +197,14 @@ const WHATIF_CHANGES = [
   { value: 'upgrade_equipment', label: 'Upgrade Equipment' },
   { value: 'extend_hours', label: 'Extend Hours' },
 ]
+
+const COPILOT_PROMPTS = [
+  'Explain this issue',
+  'What should ops do next?',
+  'Summarize current risks',
+  'Compare bottlenecks',
+  'Leadership summary',
+] as const
 
 function PlatformAnalyticsPanel({ metrics, loading }: { metrics: PlatformMetricsSnapshot | null; loading: boolean }) {
   const items = [
@@ -352,6 +368,12 @@ export default function Home() {
   const [decisionLoading, setDecisionLoading] = useState<string | null>(null)
   const [decisionResults, setDecisionResults] = useState<Record<string, string>>({})
   const [agentRateLimit, setAgentRateLimit] = useState(false)
+  const [copilotInput, setCopilotInput] = useState('')
+  const [copilotRole, setCopilotRole] = useState<'ops' | 'leadership' | 'engineering'>('ops')
+  const [copilotLoading, setCopilotLoading] = useState(false)
+  const [copilotError, setCopilotError] = useState<string | null>(null)
+  const [copilotResult, setCopilotResult] = useState<CopilotResult>(null)
+  const [activeCopilotIncidentId, setActiveCopilotIncidentId] = useState<string | null>(null)
 
   const fetchIntelligence = async (industry: string) => {
     setIntelLoading(true)
@@ -498,6 +520,12 @@ export default function Home() {
   }, [fetchPlatformMetrics, industryValue])
 
   useEffect(() => {
+    setCopilotResult(null)
+    setCopilotError(null)
+    setActiveCopilotIncidentId(null)
+  }, [industryValue])
+
+  useEffect(() => {
     let cancelled = false
 
     const loadIndustryData = async () => {
@@ -576,6 +604,7 @@ export default function Home() {
   }, [fetchData, fetchPlatformMetrics, industryDataMode, industryValue])
 
   const analyzeIncident = async (id: string) => {
+    setActiveCopilotIncidentId(id)
     setAnalyses(prev => ({ ...prev, [id]: { loading: true, result: null, error: null, rateLimit: false } }))
     try {
       const requestUrl = `${BACKEND}/analyze-incident/${id}`
@@ -628,6 +657,7 @@ export default function Home() {
   }
 
   const fetchHistory = async (id: string) => {
+    setActiveCopilotIncidentId(id)
     if (showHistoryId === id) { setShowHistoryId(null); return }
     try {
       const r = await fetch(`${BACKEND}/incidents/${id}/analysis-history`)
@@ -902,6 +932,37 @@ export default function Home() {
     }
     return s.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
   }
+
+  const askCopilot = async (messageOverride?: string) => {
+    const message = (messageOverride ?? copilotInput).trim()
+    if (!message) return
+    setCopilotLoading(true)
+    setCopilotError(null)
+    if (messageOverride) setCopilotInput(messageOverride)
+    try {
+      const incidentId = activeCopilotIncidentId ?? incidents[0]?.id ?? null
+      const r = await fetch(`${BACKEND}/copilot/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message,
+          industry: industryValue,
+          incident_id: incidentId || undefined,
+          role: copilotRole,
+          session_id: typeof window !== 'undefined' ? window.sessionStorage.getItem('ops-platform-session-active') ?? undefined : undefined,
+        }),
+      })
+      const d = await r.json().catch(() => null)
+      if (!r.ok || !d?.success) throw new Error(d?.error || d?.detail || 'Copilot request failed')
+      setCopilotResult(d)
+      fetchPlatformMetrics()
+    } catch (e: unknown) {
+      const messageText = e instanceof Error ? e.message : 'Unknown error'
+      setCopilotError(messageText.includes('Failed to fetch') ? 'Copilot could not reach the backend. Check that the local API is running.' : messageText)
+    } finally {
+      setCopilotLoading(false)
+    }
+  }
   const healthColor = (status: string) => ({ healthy: 'text-green-400', warning: 'text-yellow-400', critical: 'text-orange-400', severe: 'text-red-400' }[status] ?? 'text-gray-400')
   const healthBarColor = (status: string) => ({ healthy: 'bg-green-500', warning: 'bg-yellow-500', critical: 'bg-orange-500', severe: 'bg-red-500' }[status] ?? 'bg-gray-500')
   const trendIcon = (t: string) => t === 'degrading' ? '↓' : t === 'improving' ? '↑' : '→'
@@ -1010,6 +1071,29 @@ export default function Home() {
               >
                 <span>✦</span>
                 <span>How It Works</span>
+              </button>
+              <button
+                onClick={() => askCopilot()}
+                disabled={copilotLoading || !copilotInput.trim()}
+                className="hidden"
+              >
+                {copilotLoading ? (
+                  <><svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" /></svg>Thinkingâ€¦</>
+                ) : 'Ask Copilot'}
+              </button>
+              <button
+                onClick={() => askCopilot()}
+                disabled={copilotLoading || !copilotInput.trim()}
+                className="hidden"
+              >
+                {copilotLoading ? 'Thinking…' : 'Ask Copilot'}
+              </button>
+              <button
+                onClick={() => askCopilot()}
+                disabled={copilotLoading || !copilotInput.trim()}
+                className="flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-semibold bg-gray-100 text-gray-950 hover:bg-white disabled:opacity-50 transition-colors whitespace-nowrap"
+              >
+                {copilotLoading ? 'Thinking…' : 'Ask Copilot'}
               </button>
             </div>
           </div>
@@ -1351,20 +1435,35 @@ export default function Home() {
             <div className="flex flex-col items-center text-center mb-5">
               <div className="flex items-center gap-3 mb-2">
                 <span className="text-2xl">🤖</span>
-                <h3 className="text-base font-semibold text-white">AI Investigation Agent</h3>
+                <h3 className="text-base font-semibold text-white">Ops Copilot</h3>
               </div>
               <p className="text-xs text-gray-400 max-w-lg">The agent autonomously investigates your operation using 5 tools — health scores, cascade risks, patterns, open incidents, and ETAs. At every consequential step, <span className="text-indigo-400 font-medium">you decide</span> whether it proceeds.</p>
             </div>
 
             <div className="flex gap-3 mb-5 max-w-2xl mx-auto">
               <input
-                value={agentGoal}
-                onChange={e => setAgentGoal(e.target.value)}
-                placeholder="Optional: give the agent a specific goal (e.g. 'Focus on security_check stage')"
+                value={copilotInput}
+                onChange={e => {
+                  setCopilotInput(e.target.value)
+                  setAgentGoal(e.target.value)
+                }}
+                placeholder="Ask a question or give the agent a goal (e.g. 'Why is boarding high severity?' or 'Focus on security screening delays')"
                 className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500"
               />
+              <select
+                value={copilotRole}
+                onChange={e => setCopilotRole(e.target.value as 'ops' | 'leadership' | 'engineering')}
+                className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+              >
+                <option value="ops">Ops View</option>
+                <option value="leadership">Leadership View</option>
+                <option value="engineering">Engineering View</option>
+              </select>
               <button
-                onClick={runAgent}
+                onClick={() => {
+                  setAgentGoal(copilotInput)
+                  runAgent()
+                }}
                 disabled={agentRunning}
                 className="flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition-colors whitespace-nowrap shadow-lg shadow-indigo-500/30"
               >
@@ -1376,7 +1475,70 @@ export default function Home() {
             <p className="text-xs text-gray-600 text-center mb-5">Investigation takes 20–40 seconds. The agent will call multiple tools before surfacing findings.</p>
 
             {agentRateLimit && <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-300 text-sm mb-4 max-w-2xl mx-auto">⏳ Rate limit reached. Wait 60 seconds and try again.</div>}
+            <div className="flex justify-center mb-4">
+              <button
+                onClick={() => askCopilot()}
+                disabled={copilotLoading || !copilotInput.trim()}
+                className="flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-semibold bg-gray-100 text-gray-950 hover:bg-white disabled:opacity-50 transition-colors whitespace-nowrap"
+              >
+                {copilotLoading ? 'Thinking…' : 'Ask Copilot'}
+              </button>
+            </div>
+            <p className="text-xs text-gray-600 text-center mb-5">Copilot answers stay grounded in the current industry, incidents, thresholds, analyses, and live platform context.</p>
             {agentError && <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm mb-4 max-w-2xl mx-auto">Error: {agentError}</div>}
+            {copilotError && <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm mb-4 max-w-2xl mx-auto">Error: {copilotError}</div>}
+
+            <div className="flex flex-wrap gap-2 mb-4 max-w-3xl mx-auto justify-center">
+              {COPILOT_PROMPTS.map(prompt => (
+                <button
+                  key={prompt}
+                  onClick={() => askCopilot(prompt)}
+                  disabled={copilotLoading}
+                  className="px-3 py-1.5 rounded-full text-xs font-medium bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 transition-colors disabled:opacity-50"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
+
+            {copilotResult && (
+              <div className="max-w-3xl mx-auto mb-5 p-5 rounded-xl bg-gray-800 border border-gray-700">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-3">
+                  <div>
+                    <p className="text-xs font-semibold text-white uppercase tracking-wider">Copilot Answer</p>
+                    <p className="text-xs text-gray-500 mt-1">Scoped to {industryLabel || industryValue} {activeCopilotIncidentId ? 'with incident context' : 'with industry context'}</p>
+                  </div>
+                  <div className="text-xs text-gray-400">Confidence {Math.round(copilotResult.confidence * 100)}%</div>
+                </div>
+                <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{copilotResult.answer}</p>
+                {copilotResult.sources.length > 0 && (
+                  <div className="mt-4">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Sources</p>
+                    <div className="flex flex-wrap gap-2">
+                      {copilotResult.sources.map(source => (
+                        <span key={source} className="rounded-full border border-gray-700 bg-gray-950/70 px-2.5 py-1 text-xs text-gray-300">{source}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {copilotResult.suggested_followups.length > 0 && (
+                  <div className="mt-4">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Suggested follow-ups</p>
+                    <div className="flex flex-wrap gap-2">
+                      {copilotResult.suggested_followups.map(followup => (
+                        <button
+                          key={followup}
+                          onClick={() => askCopilot(followup)}
+                          className="px-3 py-1.5 rounded-full text-xs font-medium bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/20 transition-colors"
+                        >
+                          {followup}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {agentResult && (
               <div className="space-y-4 max-w-3xl mx-auto">

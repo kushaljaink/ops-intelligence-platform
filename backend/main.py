@@ -318,6 +318,169 @@ def safe_increment_platform_metric(metric_name: str):
         logger.exception("Failed to increment platform metric '%s'", metric_name)
 
 
+def summarize_incident_for_copilot(incident: dict) -> str:
+    return (
+        f"- Incident {incident.get('id', '')[:8]} | stage={incident.get('stage')} | severity={incident.get('severity')} | "
+        f"status={incident.get('status')} | detected={incident.get('created_at')} | description={incident.get('description')}"
+    )
+
+
+def get_recent_industry_metrics_summary(industry: str, limit: int = 6) -> list[str]:
+    response = (
+        supabase.table("workflow_metrics")
+        .select("stage, queue_size, processing_time_seconds, throughput, health_score, recorded_at")
+        .eq("industry", industry)
+        .order("recorded_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    summary = []
+    seen_stages = set()
+    for row in response.data or []:
+        stage = row.get("stage")
+        if not stage or stage in seen_stages:
+            continue
+        seen_stages.add(stage)
+        summary.append(
+            f"- {stage}: queue={row.get('queue_size')} processing={row.get('processing_time_seconds')}s "
+            f"throughput={row.get('throughput')}/hr health={row.get('health_score')} recorded_at={row.get('recorded_at')}"
+        )
+    return summary
+
+
+def get_latest_investigation_log(industry: str) -> Optional[str]:
+    try:
+        incidents_resp = (
+            supabase.table("incidents")
+            .select("id")
+            .eq("industry", industry)
+            .order("created_at", desc=True)
+            .limit(25)
+            .execute()
+        )
+        incident_ids = [row["id"] for row in (incidents_resp.data or []) if row.get("id")]
+        query = (
+            supabase.table("analysis_logs")
+            .select("ai_analysis, created_at, incident_id, triggered_by")
+            .eq("triggered_by", "agent_investigation")
+            .order("created_at", desc=True)
+            .limit(10)
+        )
+        if incident_ids:
+            query = query.in_("incident_id", incident_ids)
+        response = query.execute()
+        if response.data:
+            return response.data[0].get("ai_analysis")
+    except Exception:
+        logger.exception("Failed to load latest investigation log for industry=%s", industry)
+    return None
+
+
+def build_copilot_context(industry: str, message: str, incident_id: Optional[str] = None) -> tuple[str, list[str]]:
+    thresholds = INDUSTRY_THRESHOLDS.get(industry, {"queue": 50, "processing": 300, "throughput": 10})
+    sources = [f"thresholds:{industry}", f"industry:{industry}"]
+
+    incidents_query = (
+        supabase.table("incidents")
+        .select("id, stage, severity, description, status, created_at")
+        .eq("industry", industry)
+        .order("created_at", desc=True)
+        .limit(8)
+    )
+    incidents_resp = incidents_query.execute()
+    incidents = incidents_resp.data or []
+
+    selected_incident = None
+    if incident_id:
+        selected_resp = (
+            supabase.table("incidents")
+            .select("id, stage, severity, description, status, created_at")
+            .eq("id", incident_id)
+            .limit(1)
+            .execute()
+        )
+        if selected_resp.data:
+            selected_incident = selected_resp.data[0]
+            sources.insert(0, f"incident:{selected_incident.get('stage')}")
+
+    incident_summaries = [summarize_incident_for_copilot(incident) for incident in incidents]
+
+    latest_analysis = None
+    if incident_id:
+        analysis_resp = (
+            supabase.table("analysis_logs")
+            .select("ai_analysis, confidence_score, created_at")
+            .eq("incident_id", incident_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if analysis_resp.data:
+            latest_analysis = analysis_resp.data[0]
+            sources.append("analysis:latest")
+    elif incidents:
+        incident_ids = [incident["id"] for incident in incidents if incident.get("id")]
+        if incident_ids:
+            analysis_resp = (
+                supabase.table("analysis_logs")
+                .select("incident_id, ai_analysis, confidence_score, created_at")
+                .in_("incident_id", incident_ids)
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if analysis_resp.data:
+                latest_analysis = analysis_resp.data[0]
+                sources.append("analysis:latest")
+
+    latest_investigation = get_latest_investigation_log(industry)
+    if latest_investigation:
+        sources.append("investigation:latest")
+
+    metric_summary = get_recent_industry_metrics_summary(industry)
+    if metric_summary:
+        sources.append("metrics:recent")
+
+    live_data_relevant = industry in SUPPORTED_LIVE_INDUSTRIES or "live" in message.lower()
+    live_summary = ""
+    if live_data_relevant:
+        live_incidents = [incident for incident in incidents if incident.get("status") == "open"][:3]
+        if live_incidents:
+            live_summary = "\n".join(summarize_incident_for_copilot(incident) for incident in live_incidents)
+            sources.append("live-data:current")
+
+    platform_metrics_summary = ""
+    if any(token in message.lower() for token in ["usage", "telemetry", "visitors", "sessions", "metrics", "trend"]):
+        try:
+            snapshot = get_metrics_snapshot()
+            platform_metrics_summary = (
+                f"- visitors_today={snapshot.get('visitors_today', 0)}\n"
+                f"- active_sessions={snapshot.get('active_sessions', 0)}\n"
+                f"- incidents_analyzed={snapshot.get('incidents_analyzed', 0)}\n"
+                f"- agent_investigations={snapshot.get('agent_investigations', 0)}\n"
+                f"- webhook_events_received={snapshot.get('webhook_events_received', 0)}\n"
+                f"- live_data_refresh_calls={snapshot.get('live_data_refresh_calls', 0)}\n"
+                f"- industries_explored={snapshot.get('industries_explored', 0)}"
+            )
+            sources.append("platform-metrics:current")
+        except Exception:
+            logger.exception("Failed to build platform metrics context for copilot")
+
+    context = (
+        f"Industry: {industry}\n"
+        f"Industry context: {get_industry_ai_context(industry)}\n"
+        f"Thresholds: queue>{thresholds['queue']} processing>{thresholds['processing']} throughput<{thresholds['throughput']}\n\n"
+        f"Selected incident:\n{summarize_incident_for_copilot(selected_incident) if selected_incident else 'None selected.'}\n\n"
+        f"Current incidents:\n{chr(10).join(incident_summaries) if incident_summaries else 'No current incidents.'}\n\n"
+        f"Recent stage metrics:\n{chr(10).join(metric_summary) if metric_summary else 'No recent workflow metric data.'}\n\n"
+        f"Latest incident analysis:\n{latest_analysis.get('ai_analysis') if latest_analysis else 'No prior analysis available.'}\n\n"
+        f"Latest investigation output:\n{latest_investigation or 'No prior investigation available.'}\n\n"
+        f"Current live-data snapshot:\n{live_summary or 'No live-data-specific context available.'}\n\n"
+        f"Platform telemetry:\n{platform_metrics_summary or 'No platform telemetry requested or available.'}"
+    )
+    return context, list(dict.fromkeys(sources))
+
+
 def format_live_data_response(industry: str, results: dict, all_incidents: list, mode_counts: dict):
     if industry == "all":
         overall_mode = "mixed" if len({r["data_mode"] for r in results.values()}) > 1 else next(iter(results.values()))["data_mode"] if results else "fallback"
@@ -1016,6 +1179,14 @@ class AgentInvestigateRequest(BaseModel):
     goal: Optional[str] = None
 
 
+class CopilotChatRequest(BaseModel):
+    message: str
+    industry: str = "cruise"
+    incident_id: Optional[str] = None
+    role: Optional[str] = "ops"
+    session_id: Optional[str] = None
+
+
 class AgentDecisionRequest(BaseModel):
     decision_id: str
     approved: bool
@@ -1513,6 +1684,63 @@ Extract up to 20 rows. Return ONLY the JSON object."""
     ai_analysis = await call_groq(analysis_prompt, max_tokens=600)
 
     return {"success": True, "filename": filename, "rows_extracted": len(rows_data), "column_mapping": column_mapping, "notes": notes, "detected_issues": issues, "ai_analysis": ai_analysis, "rows": rows_data}
+
+
+@app.post("/copilot/chat")
+async def copilot_chat(body: CopilotChatRequest):
+    message = (body.message or "").strip()
+    if not message:
+        return {"success": False, "error": "Message is required."}
+
+    role = (body.role or "ops").strip().lower()
+    if role not in {"ops", "leadership", "engineering"}:
+        role = "ops"
+
+    safe_increment_platform_metric("copilot_questions")
+
+    try:
+        context, sources = build_copilot_context(body.industry, message, body.incident_id)
+        role_instructions = {
+            "ops": "Prioritize practical next steps, immediate risks, and operator-friendly language.",
+            "leadership": "Prioritize business impact, urgency, exposure, and concise executive framing.",
+            "engineering": "Prioritize bottleneck mechanics, thresholds, system behavior, and signal interpretation.",
+        }
+        prompt = (
+            "You are Ops Copilot for an internal operations intelligence platform.\n"
+            f"Role mode: {role}.\n"
+            f"{role_instructions[role]}\n"
+            "Answer only from the platform context below. Do not use outside knowledge. "
+            "If the question is not supported by the provided platform context, say so clearly.\n\n"
+            "Write the answer with these sections:\n"
+            "Direct answer\nWhy the platform thinks this\nRecommended next step\nSuggested follow-ups\n\n"
+            f"Platform context:\n{context}\n\n"
+            f"User question: {message}"
+        )
+        answer = await call_groq(prompt, max_tokens=700)
+        confidence_score, _ = extract_confidence(answer)
+        suggested_followups = [
+            "What should ops do next?",
+            "What is the downstream impact?",
+            "Summarize for leadership",
+        ]
+        if "compare" in message.lower() or "bottleneck" in message.lower():
+            suggested_followups = [
+                "Compare bottlenecks by severity",
+                "Which stage is most likely to cascade next?",
+                "What threshold is driving this risk?",
+            ]
+        return {
+            "success": True,
+            "answer": answer,
+            "confidence": round(confidence_score / 100, 2),
+            "sources": sources,
+            "suggested_followups": suggested_followups,
+        }
+    except HTTPException as exc:
+        return {"success": False, "error": exc.detail}
+    except Exception:
+        logger.exception("Copilot chat failed for industry=%s role=%s", body.industry, role)
+        return {"success": False, "error": "Copilot could not complete the request."}
 
 
 class SuggestionPayload(BaseModel):
