@@ -5,9 +5,13 @@ No LangChain. Pure Groq function calling.
 
 import httpx
 import json
+import logging
+import time
 from supabase import Client
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
+
+logger = logging.getLogger(__name__)
 
 INDUSTRY_THRESHOLDS = {
     "cruise":        {"queue": 50,  "processing": 300, "throughput": 10},
@@ -225,6 +229,17 @@ def execute_tool(tool_name: str, tool_args: dict, supabase: Client, groq_api_key
 
 def run_investigation(supabase: Client, groq_api_key: str, industry: str, custom_goal: str = "") -> dict:
     goal = custom_goal or f"Investigate the {industry} operation. Check health scores, open incidents, cascade risks, ETAs, and patterns for any critical stages. Provide a prioritized action plan."
+    if not groq_api_key:
+        return {
+            "success": False,
+            "error": "Backend investigation failed: missing model provider API key.",
+            "reason": "backend",
+            "industry": industry,
+            "steps": [],
+            "output": "",
+            "decision_points": [],
+            "investigated_at": datetime.now(timezone.utc).isoformat(),
+        }
 
     system_prompt = f"""You are an AI operations intelligence agent for a {industry} operation.
 Industry context: {INDUSTRY_AI_CONTEXT.get(industry, f"A workflow-driven {industry} operation.")}
@@ -247,14 +262,29 @@ For construction, emphasize permit delays, inspection backlog, blocked downstrea
     ]
 
     parsed_steps = []
-    max_iterations = 10
+    max_iterations = 4
+    total_runtime_seconds = 40
+    per_call_timeout_seconds = 25.0
     iteration = 0
     output = "Investigation complete."
+    started_at = time.monotonic()
 
     try:
-        with httpx.Client(timeout=90.0) as client:
+        with httpx.Client(timeout=per_call_timeout_seconds) as client:
             while iteration < max_iterations:
                 iteration += 1
+                if time.monotonic() - started_at >= total_runtime_seconds:
+                    logger.warning("Agent investigation exceeded runtime budget for %s", industry)
+                    return {
+                        "success": False,
+                        "error": "Investigation timed out before the backend could finish.",
+                        "reason": "timeout",
+                        "industry": industry,
+                        "steps": parsed_steps,
+                        "output": "",
+                        "decision_points": [],
+                        "investigated_at": datetime.now(timezone.utc).isoformat(),
+                    }
 
                 response = client.post(
                     "https://api.groq.com/openai/v1/chat/completions",
@@ -272,7 +302,8 @@ For construction, emphasize permit delays, inspection backlog, blocked downstrea
                 )
 
                 if response.status_code == 429:
-                    return {"success": False, "error": "GROQ_RATE_LIMIT: Rate limited. Wait 60 seconds.", "industry": industry, "steps": parsed_steps, "output": "", "decision_points": [], "investigated_at": datetime.now(timezone.utc).isoformat()}
+                    logger.warning("Agent investigation rate limited for %s", industry)
+                    return {"success": False, "error": "Rate limited by model provider.", "reason": "rate_limit", "industry": industry, "steps": parsed_steps, "output": "", "decision_points": [], "investigated_at": datetime.now(timezone.utc).isoformat()}
 
                 response.raise_for_status()
                 data = response.json()
@@ -318,9 +349,11 @@ For construction, emphasize permit delays, inspection backlog, blocked downstrea
                 output = "Investigation reached maximum iterations."
 
     except httpx.TimeoutException:
-        return {"success": False, "error": "Request timed out. Try again.", "industry": industry, "steps": parsed_steps, "output": "", "decision_points": [], "investigated_at": datetime.now(timezone.utc).isoformat()}
+        logger.warning("Agent investigation request timed out for %s", industry)
+        return {"success": False, "error": "Investigation timed out.", "reason": "timeout", "industry": industry, "steps": parsed_steps, "output": "", "decision_points": [], "investigated_at": datetime.now(timezone.utc).isoformat()}
     except Exception as e:
-        return {"success": False, "error": str(e), "industry": industry, "steps": parsed_steps, "output": "", "decision_points": [], "investigated_at": datetime.now(timezone.utc).isoformat()}
+        logger.exception("Agent investigation failed for %s", industry)
+        return {"success": False, "error": "Backend investigation failed.", "reason": "backend", "industry": industry, "steps": parsed_steps, "output": "", "decision_points": [], "investigated_at": datetime.now(timezone.utc).isoformat()}
 
     output_lower = output.lower()
     decision_points = []

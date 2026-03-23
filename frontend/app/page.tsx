@@ -660,14 +660,26 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ industry: industryValue, goal: agentGoal || undefined }),
       })
-      const d = await r.json()
-      if (r.status === 429 || d.detail?.startsWith('GROQ_RATE_LIMIT')) { setAgentRateLimit(true); return }
-      if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`)
-      if (!d.success) throw new Error(d.error || 'Investigation failed')
+      const d = await r.json().catch(() => null)
+      if (r.status === 429 || d?.reason === 'rate_limit' || d?.detail?.startsWith('GROQ_RATE_LIMIT')) {
+        setAgentRateLimit(true)
+        setAgentError('Investigation failed: Rate limited by model provider.')
+        return
+      }
+      if (!r.ok) throw new Error(d?.error || d?.detail || 'Investigation failed on backend')
+      if (!d?.success) {
+        setAgentError(`Investigation failed: ${d?.error || 'Unknown error'}`)
+        return
+      }
       setAgentResult(d)
       fetchPlatformMetrics()
     } catch (e: unknown) {
-      setAgentError(e instanceof Error ? e.message : 'Unknown error')
+      const message = e instanceof Error ? e.message : 'Unknown error'
+      if (message.includes('Failed to fetch')) {
+        setAgentError('Agent request could not reach backend. The backend may be sleeping or the investigation may have timed out.')
+      } else {
+        setAgentError(`Investigation failed: ${message}`)
+      }
     } finally {
       setAgentRunning(false)
     }

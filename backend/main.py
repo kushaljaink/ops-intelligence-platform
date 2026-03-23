@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import FastAPI, HTTPException, Request
 from fastapi import UploadFile, File, Form
 import jwt as pyjwt
@@ -14,6 +15,7 @@ import logging
 from supabase import create_client
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
+from ops_agent import run_investigation
 from services.live_data_service import fetch_live_incident_bundle, SUPPORTED_LIVE_INDUSTRIES, build_fallback_live_result
 from services.metrics_service import (
     get_metrics_snapshot,
@@ -959,6 +961,40 @@ class AgentDecisionRequest(BaseModel):
 
 @app.post("/agent/investigate")
 async def agent_investigate(body: AgentInvestigateRequest):
+    safe_increment_platform_metric("agent_investigations")
+    industry = body.industry
+
+    try:
+        result = await asyncio.to_thread(
+            run_investigation,
+            supabase,
+            GROQ_API_KEY,
+            industry,
+            body.goal or "",
+        )
+    except Exception:
+        logger.exception("Unexpected agent route failure for industry=%s", industry)
+        return {
+            "success": False,
+            "error": "Backend investigation failed",
+            "reason": "backend",
+            "industry": industry,
+            "steps": [],
+            "output": "",
+            "decision_points": [],
+            "investigated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    if not result.get("success", False):
+        logger.warning(
+            "Agent investigation returned failure for industry=%s reason=%s error=%s",
+            industry,
+            result.get("reason"),
+            result.get("error"),
+        )
+
+    return result
+
     """Run agent investigation with inline execution — no module import to avoid cache issues."""
     import json as _json
 
