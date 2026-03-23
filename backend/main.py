@@ -1270,8 +1270,14 @@ For construction, emphasize permit delays, inspection backlog, blocked downstrea
                     logger.error("Legacy agent investigation received invalid message for industry=%s: %r", industry, message)
                     output = "AI provider returned an invalid message payload. Please try again."
                     break
-                messages.append(message)
                 tool_calls = message.get("tool_calls") or []
+                assistant_message = {
+                    "role": message.get("role") or "assistant",
+                    "content": message.get("content") or "",
+                }
+                if tool_calls:
+                    assistant_message["tool_calls"] = tool_calls
+                messages.append(assistant_message)
                 if not tool_calls:
                     output = message.get("content") or "Investigation complete."
                     break
