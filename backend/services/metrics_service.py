@@ -36,6 +36,11 @@ def _log_metrics_error(action: str, error: Exception, metric_name: str | None = 
         logger.error("The 'platform_metrics' table appears to be missing. Apply platform_metrics.sql in Supabase.")
 
 
+def _log_fallback_usage(action: str, metric_name: str | None = None) -> None:
+    metric_hint = f" for '{metric_name}'" if metric_name else ""
+    logger.warning("Using workflow_metrics fallback for platform metrics %s%s", action, metric_hint)
+
+
 def _get_fallback_metric_value(metric_name: str, initial_value: int = 0) -> int:
     supabase = _get_supabase()
     response = (
@@ -130,9 +135,8 @@ def _ensure_metric(metric_name: str, initial_value: int = 0) -> int:
         return initial_value
     except Exception as error:
         _log_metrics_error("ensure", error, metric_name)
-        if _is_missing_table_error(error):
-            return _set_fallback_metric_value(metric_name, _get_fallback_metric_value(metric_name, initial_value))
-        raise
+        _log_fallback_usage("ensure", metric_name)
+        return _set_fallback_metric_value(metric_name, _get_fallback_metric_value(metric_name, initial_value))
 
 
 def increment_metric(metric_name: str, amount: int = 1) -> int:
@@ -147,10 +151,9 @@ def increment_metric(metric_name: str, amount: int = 1) -> int:
         return new_value
     except Exception as error:
         _log_metrics_error("increment", error, metric_name)
-        if _is_missing_table_error(error):
-            current_value = _get_fallback_metric_value(metric_name, 0)
-            return _set_fallback_metric_value(metric_name, current_value + amount)
-        raise
+        _log_fallback_usage("increment", metric_name)
+        current_value = _get_fallback_metric_value(metric_name, 0)
+        return _set_fallback_metric_value(metric_name, current_value + amount)
 
 
 def set_metric(metric_name: str, value: int) -> int:
@@ -165,9 +168,8 @@ def set_metric(metric_name: str, value: int) -> int:
         return safe_value
     except Exception as error:
         _log_metrics_error("set", error, metric_name)
-        if _is_missing_table_error(error):
-            return _set_fallback_metric_value(metric_name, value)
-        raise
+        _log_fallback_usage("set", metric_name)
+        return _set_fallback_metric_value(metric_name, value)
 
 
 def get_metric_value(metric_name: str) -> int:
@@ -212,12 +214,10 @@ def get_metrics_snapshot() -> dict:
         metric_map = {row["metric_name"]: int(row.get("metric_value", 0) or 0) for row in rows}
     except Exception as error:
         _log_metrics_error("snapshot", error)
-        if _is_missing_table_error(error):
-            for metric_name in (*CORE_METRIC_NAMES, _today_metric_name()):
-                _set_fallback_metric_value(metric_name, _get_fallback_metric_value(metric_name, 0))
-            metric_map = _get_fallback_metric_map()
-        else:
-            raise
+        _log_fallback_usage("snapshot")
+        for metric_name in (*CORE_METRIC_NAMES, _today_metric_name()):
+            _set_fallback_metric_value(metric_name, _get_fallback_metric_value(metric_name, 0))
+        metric_map = _get_fallback_metric_map()
 
     top_industries = []
     for metric_name, metric_value in metric_map.items():
