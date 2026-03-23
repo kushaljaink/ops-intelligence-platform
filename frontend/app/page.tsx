@@ -407,7 +407,7 @@ export default function Home() {
     try {
       const response = await fetch(`${BACKEND}/platform-metrics`)
       const payload = await response.json()
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`)
       setPlatformMetrics(payload)
     } catch (err) {
       console.error(err)
@@ -440,7 +440,11 @@ export default function Home() {
       }
 
       try {
-        await fetch(`${BACKEND}/platform-metrics/session-start`, { method: 'POST' })
+        const response = await fetch(`${BACKEND}/platform-metrics/session-start`, { method: 'POST' })
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null)
+          throw new Error(payload?.detail || `HTTP ${response.status}`)
+        }
         window.sessionStorage.setItem(sessionStorageKey, '1')
       } catch (err) {
         console.error(err)
@@ -473,10 +477,14 @@ export default function Home() {
 
     const trackIndustrySelection = async () => {
       try {
-        await fetch(`${BACKEND}/platform-metrics/industry-selection?industry=${encodeURIComponent(industryValue)}`, {
+        const response = await fetch(`${BACKEND}/platform-metrics/industry-selection?industry=${encodeURIComponent(industryValue)}`, {
           method: 'POST',
           signal: controller.signal,
         })
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null)
+          throw new Error(payload?.detail || `HTTP ${response.status}`)
+        }
         fetchPlatformMetrics()
       } catch (err) {
         if ((err as Error).name !== 'AbortError') {

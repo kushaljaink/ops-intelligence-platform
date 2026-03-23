@@ -417,22 +417,38 @@ def health():
 
 @app.get("/platform-metrics")
 def get_platform_metrics():
-    return get_metrics_snapshot()
+    try:
+        return get_metrics_snapshot()
+    except Exception:
+        logger.exception("Failed to load platform metrics snapshot")
+        raise HTTPException(status_code=503, detail="Platform metrics are unavailable. Confirm platform_metrics.sql has been applied.")
 
 
 @app.post("/platform-metrics/session-start")
 def track_platform_session_start():
-    return {"success": True, **record_visitor_session_start()}
+    try:
+        return {"success": True, **record_visitor_session_start()}
+    except Exception:
+        logger.exception("Failed to record platform session start")
+        raise HTTPException(status_code=503, detail="Platform metrics are unavailable. Confirm platform_metrics.sql has been applied.")
 
 
 @app.post("/platform-metrics/session-end")
 def track_platform_session_end():
-    return {"success": True, "active_sessions": record_visitor_session_end()}
+    try:
+        return {"success": True, "active_sessions": record_visitor_session_end()}
+    except Exception:
+        logger.exception("Failed to record platform session end")
+        raise HTTPException(status_code=503, detail="Platform metrics are unavailable. Confirm platform_metrics.sql has been applied.")
 
 
 @app.post("/platform-metrics/industry-selection")
 def track_platform_industry_selection(industry: str = "cruise"):
-    return {"success": True, **record_industry_selection(industry)}
+    try:
+        return {"success": True, **record_industry_selection(industry)}
+    except Exception:
+        logger.exception("Failed to record platform industry selection for %s", industry)
+        raise HTTPException(status_code=503, detail="Platform metrics are unavailable. Confirm platform_metrics.sql has been applied.")
 
 
 @app.get("/auth/me")
@@ -505,7 +521,7 @@ def get_workflow_events():
 
 @app.post("/analyze-incident/{incident_id}")
 async def analyze_incident(incident_id: str):
-    increment_metric("incidents_analyzed")
+    safe_increment_platform_metric("incidents_analyzed")
     result = supabase.table("incidents").select("*").eq("id", incident_id).single().execute()
     if not result.data:
         raise HTTPException(status_code=404, detail="Incident not found")
@@ -1607,7 +1623,7 @@ class WebhookPayload(BaseModel):
 
 @app.post("/webhook/events")
 async def receive_webhook(payload: WebhookPayload):
-    increment_metric("webhook_events_received")
+    safe_increment_platform_metric("webhook_events_received")
     if WEBHOOK_SECRET and payload.secret != WEBHOOK_SECRET:
         raise HTTPException(status_code=401, detail="Invalid secret")
     # Resolve user from API key
