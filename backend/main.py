@@ -1029,6 +1029,7 @@ async def agent_investigate(body: AgentInvestigateRequest):
     safe_increment_platform_metric("agent_investigations")
     industry = body.industry
     logger.info("Agent investigation requested for industry=%s goal_provided=%s", industry, bool(body.goal))
+    helper_failure_result = None
 
     try:
         def run_agent_job():
@@ -1045,7 +1046,7 @@ async def agent_investigate(body: AgentInvestigateRequest):
         )
     except Exception:
         logger.exception("Unexpected agent route failure for industry=%s", industry)
-        return {
+        helper_failure_result = {
             "success": False,
             "error": "Backend investigation failed",
             "reason": "backend",
@@ -1056,22 +1057,30 @@ async def agent_investigate(body: AgentInvestigateRequest):
             "investigated_at": datetime.now(timezone.utc).isoformat(),
         }
 
-    if not result.get("success", False):
+    if helper_failure_result is None and result.get("success", False):
+        logger.info("Agent investigation succeeded for industry=%s steps=%s", industry, len(result.get("steps", [])))
+        return result
+
+    if helper_failure_result is None and not result.get("success", False):
         logger.warning(
             "Agent investigation returned failure for industry=%s reason=%s error=%s",
             industry,
             result.get("reason"),
             result.get("error"),
         )
-    else:
-        logger.info("Agent investigation succeeded for industry=%s steps=%s", industry, len(result.get("steps", [])))
+        if result.get("reason") != "backend":
+            return result
+        helper_failure_result = result
 
-    return result
+    logger.warning(
+        "Falling back to legacy inline investigation path for industry=%s after helper failure error=%s",
+        industry,
+        helper_failure_result.get("error") if helper_failure_result else "unknown",
+    )
 
     """Run agent investigation with inline execution — no module import to avoid cache issues."""
     import json as _json
 
-    increment_metric("agent_investigations")
     industry = body.industry
     goal = body.goal or f"Investigate the {industry} operation. Check health scores, open incidents, cascade risks, ETAs, and patterns for any critical stages. Provide a prioritized action plan."
 
