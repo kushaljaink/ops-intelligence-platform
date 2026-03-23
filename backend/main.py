@@ -243,6 +243,10 @@ def upsert_live_incident_record(incident: dict) -> dict | None:
     return created.data[0] if created.data else None
 
 
+def clear_demo_incidents_for_live_industry(industry: str):
+    supabase.table("incidents").delete().eq("industry", industry).is_("user_id", "null").execute()
+
+
 def insert_live_metric_record(metric_event: dict):
     industry = metric_event["industry"]
     thresholds = INDUSTRY_THRESHOLDS.get(industry, {"queue": 50, "processing": 300, "throughput": 10})
@@ -1409,6 +1413,13 @@ async def fetch_live_data(industry: str = "all"):
             inserted_metrics = 0
             fetched_at = datetime.now(timezone.utc).isoformat()
             route_error = result.get("error")
+
+            try:
+                if ind in SUPPORTED_LIVE_INDUSTRIES:
+                    clear_demo_incidents_for_live_industry(ind)
+            except Exception as exc:
+                logger.exception("Failed to clear prior demo incidents for %s", ind)
+                route_error = route_error or f"Demo incident cleanup failed: {str(exc)}"
 
             for metric_event in metric_events:
                 try:

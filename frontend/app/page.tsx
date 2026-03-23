@@ -91,6 +91,13 @@ type PlatformMetricsSnapshot = {
 }
 
 const BACKEND = 'https://ops-intelligence-platform.onrender.com'
+const PROJECT_LINKS = {
+  demo: 'https://ops-intelligence-platform.vercel.app',
+  docs: 'https://ops-intelligence-platform.onrender.com/docs',
+  github: 'https://github.com/kushaljaink/ops-intelligence-platform',
+  githubIssues: 'https://github.com/kushaljaink/ops-intelligence-platform/issues/new',
+  linkedin: 'https://www.linkedin.com/in/kushaljaink/',
+} as const
 const LIVE_DATA_INDUSTRIES = ['healthcare', 'airport', 'energy', 'water', 'weather'] as const
 const INDUSTRY_DATA_MODES: Record<string, 'hybrid' | 'demo'> = {
   healthcare: 'hybrid',
@@ -220,6 +227,11 @@ function PlatformAnalyticsPanel({ metrics, loading }: { metrics: PlatformMetrics
           ))}
         </div>
       )}
+      <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-gray-500">
+        <span>Built by Kushal Jain</span>
+        <a href={PROJECT_LINKS.github} target="_blank" rel="noreferrer" className="hover:text-indigo-400 transition-colors">GitHub</a>
+        <a href={PROJECT_LINKS.linkedin} target="_blank" rel="noreferrer" className="hover:text-indigo-400 transition-colors">LinkedIn</a>
+      </div>
     </div>
   )
 }
@@ -307,7 +319,7 @@ export default function Home() {
   const [playbookRateLimit, setPlaybookRateLimit] = useState(false)
 
   // Industry
-  const [selectedIndustry, setSelectedIndustry] = useState('cruise')
+  const [selectedIndustry, setSelectedIndustry] = useState('airport')
   const [customIndustry, setCustomIndustry] = useState('')
   const industryValue = selectedIndustry === 'custom' ? customIndustry || 'operations' : selectedIndustry
   const industryLabel = INDUSTRIES.find(i => i.value === selectedIndustry)?.label ?? customIndustry
@@ -488,12 +500,11 @@ export default function Home() {
         modeLabel: industryDataMode === 'hybrid' ? undefined : 'Demo Data',
       })
 
-      await Promise.all([
-        fetchData(industryValue),
-        fetchIntelligence(industryValue),
-      ])
-
       if (cancelled || !LIVE_DATA_INDUSTRIES.includes(industryValue as typeof LIVE_DATA_INDUSTRIES[number])) {
+        await Promise.all([
+          fetchData(industryValue),
+          fetchIntelligence(industryValue),
+        ])
         if (!cancelled && industryDataMode !== 'hybrid') {
           setLiveFetchState({ status: 'demo', message: 'Demo data active', supportLabel: 'Demo', modeLabel: 'Demo Data' })
         }
@@ -538,6 +549,10 @@ export default function Home() {
             supportLabel: 'Hybrid',
             modeLabel: 'Fallback Demo',
           })
+          await Promise.all([
+            fetchData(industryValue),
+            fetchIntelligence(industryValue),
+          ])
         }
       }
     }
@@ -1757,7 +1772,8 @@ export default function Home() {
                 >
                   {suggestSubmitting ? 'Submitting…' : 'Submit Idea'}
                 </button>
-                <a href="https://github.com/kushaljaink/ops-intelligence-platform/issues/new" target="_blank" rel="noreferrer" className="text-xs text-gray-500 hover:text-indigo-400 transition-colors">Open GitHub Issue →</a>
+                <a href={PROJECT_LINKS.githubIssues} target="_blank" rel="noreferrer" className="text-xs text-gray-500 hover:text-indigo-400 transition-colors">Open GitHub Issue →</a>
+                <a href={PROJECT_LINKS.linkedin} target="_blank" rel="noreferrer" className="text-xs text-gray-500 hover:text-indigo-400 transition-colors">LinkedIn</a>
               </div>
               {suggestSuccess && <p className="text-sm text-green-400">✓ Submitted! Thank you.</p>}
               {suggestError && <p className="text-sm text-red-400">{suggestError}</p>}
@@ -2015,10 +2031,11 @@ export default function Home() {
             <div>
               <h2 className="text-xl font-bold text-white mb-1">Ops Intelligence Platform</h2>
               <p className="text-sm text-indigo-400">Built by Kushal Jain · March 2026</p>
-              <div className="flex items-center gap-3 mt-2">
-                <a href="https://ops-intelligence-platform.vercel.app" target="_blank" rel="noreferrer" className="text-xs text-gray-500 hover:text-indigo-400 transition-colors">🌐 Live Demo</a>
-                <a href="https://ops-intelligence-platform.onrender.com/docs" target="_blank" rel="noreferrer" className="text-xs text-gray-500 hover:text-indigo-400 transition-colors">🔌 API Docs</a>
-                <a href="https://github.com/kushaljaink/ops-intelligence-platform" target="_blank" rel="noreferrer" className="text-xs text-gray-500 hover:text-indigo-400 transition-colors">📁 GitHub</a>
+              <div className="flex items-center gap-3 mt-2 flex-wrap">
+                <a href={PROJECT_LINKS.demo} target="_blank" rel="noreferrer" className="text-xs text-gray-500 hover:text-indigo-400 transition-colors">🌐 Live Demo</a>
+                <a href={PROJECT_LINKS.docs} target="_blank" rel="noreferrer" className="text-xs text-gray-500 hover:text-indigo-400 transition-colors">🔌 API Docs</a>
+                <a href={PROJECT_LINKS.github} target="_blank" rel="noreferrer" className="text-xs text-gray-500 hover:text-indigo-400 transition-colors">📁 GitHub</a>
+                <a href={PROJECT_LINKS.linkedin} target="_blank" rel="noreferrer" className="text-xs text-gray-500 hover:text-indigo-400 transition-colors">💼 LinkedIn</a>
               </div>
             </div>
             <button onClick={() => setShowAbout(false)} className="text-gray-500 hover:text-white transition-colors text-2xl leading-none">×</button>
