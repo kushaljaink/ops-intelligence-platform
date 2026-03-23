@@ -230,9 +230,10 @@ def execute_tool(tool_name: str, tool_args: dict, supabase: Client, groq_api_key
 def run_investigation(supabase: Client, groq_api_key: str, industry: str, custom_goal: str = "") -> dict:
     goal = custom_goal or f"Investigate the {industry} operation. Check health scores, open incidents, cascade risks, ETAs, and patterns for any critical stages. Provide a prioritized action plan."
     if not groq_api_key:
+        logger.error("Agent investigation requested without GROQ_API_KEY for industry=%s", industry)
         return {
             "success": False,
-            "error": "Backend investigation failed: missing model provider API key.",
+            "error": "AI provider is not configured on the backend. Set GROQ_API_KEY on Render.",
             "reason": "backend",
             "industry": industry,
             "steps": [],
@@ -304,6 +305,9 @@ For construction, emphasize permit delays, inspection backlog, blocked downstrea
                 if response.status_code == 429:
                     logger.warning("Agent investigation rate limited for %s", industry)
                     return {"success": False, "error": "Rate limited by model provider.", "reason": "rate_limit", "industry": industry, "steps": parsed_steps, "output": "", "decision_points": [], "investigated_at": datetime.now(timezone.utc).isoformat()}
+                if response.status_code in {401, 403}:
+                    logger.error("Agent investigation Groq authentication failed for %s with status %s", industry, response.status_code)
+                    return {"success": False, "error": "AI provider authentication failed. Verify GROQ_API_KEY on Render.", "reason": "backend", "industry": industry, "steps": parsed_steps, "output": "", "decision_points": [], "investigated_at": datetime.now(timezone.utc).isoformat()}
 
                 response.raise_for_status()
                 data = response.json()
@@ -351,6 +355,10 @@ For construction, emphasize permit delays, inspection backlog, blocked downstrea
     except httpx.TimeoutException:
         logger.warning("Agent investigation request timed out for %s", industry)
         return {"success": False, "error": "Investigation timed out.", "reason": "timeout", "industry": industry, "steps": parsed_steps, "output": "", "decision_points": [], "investigated_at": datetime.now(timezone.utc).isoformat()}
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code if exc.response else 502
+        logger.exception("Agent investigation provider HTTP error for %s with status %s", industry, status_code)
+        return {"success": False, "error": f"AI provider request failed with status {status_code}.", "reason": "backend", "industry": industry, "steps": parsed_steps, "output": "", "decision_points": [], "investigated_at": datetime.now(timezone.utc).isoformat()}
     except Exception as e:
         logger.exception("Agent investigation failed for %s", industry)
         return {"success": False, "error": "Backend investigation failed.", "reason": "backend", "industry": industry, "steps": parsed_steps, "output": "", "decision_points": [], "investigated_at": datetime.now(timezone.utc).isoformat()}

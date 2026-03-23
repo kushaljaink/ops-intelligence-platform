@@ -90,7 +90,7 @@ type PlatformMetricsSnapshot = {
   top_industries_explored: { industry: string; count: number }[]
 }
 
-const BACKEND = 'https://ops-intelligence-platform.onrender.com'
+const BACKEND = process.env.NEXT_PUBLIC_API_URL || 'https://ops-intelligence-platform.onrender.com'
 const PROJECT_LINKS = {
   demo: 'https://ops-intelligence-platform.vercel.app',
   docs: 'https://ops-intelligence-platform.onrender.com/docs',
@@ -579,13 +579,18 @@ export default function Home() {
     setAnalyses(prev => ({ ...prev, [id]: { loading: true, result: null, error: null, rateLimit: false } }))
     try {
       const r = await fetch(`${BACKEND}/analyze-incident/${id}`, { method: 'POST' })
-      const d = await r.json()
+      const d = await r.json().catch(() => null)
       if (r.status === 429 || d.detail?.startsWith('GROQ_RATE_LIMIT')) { setAnalyses(prev => ({ ...prev, [id]: { loading: false, result: null, error: null, rateLimit: true } })); return }
-      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      if (!r.ok) throw new Error(d?.error || d?.detail || `HTTP ${r.status}`)
+      if (!d?.success && !d?.ai_analysis) throw new Error(d?.error || 'Backend analysis failed')
       setAnalyses(prev => ({ ...prev, [id]: { loading: false, result: d.ai_analysis, error: null, rateLimit: false, confidence: d.confidence_score, confidenceReason: d.confidence_reason } }))
       fetchPlatformMetrics()
     } catch (err: unknown) {
-      setAnalyses(prev => ({ ...prev, [id]: { loading: false, result: null, error: err instanceof Error ? err.message : 'Unknown error', rateLimit: false } }))
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      const userMessage = message.includes('Failed to fetch')
+        ? 'Analysis request could not reach the backend. The backend may be sleeping or the request may have timed out.'
+        : message
+      setAnalyses(prev => ({ ...prev, [id]: { loading: false, result: null, error: userMessage, rateLimit: false } }))
     }
   }
 

@@ -27,6 +27,8 @@ from services.metrics_service import (
 
 load_dotenv()
 
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
+
 app = FastAPI(title="Ops Intelligence Platform")
 
 app.add_middleware(
@@ -44,6 +46,17 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
 logger = logging.getLogger(__name__)
+
+
+@app.on_event("startup")
+async def log_startup_configuration():
+    logger.info(
+        "Startup configuration loaded: supabase_url=%s groq_key=%s resend_key=%s jwt_secret=%s",
+        bool(os.getenv("SUPABASE_URL")),
+        bool(GROQ_API_KEY),
+        bool(RESEND_API_KEY),
+        bool(SUPABASE_JWT_SECRET),
+    )
 
 INDUSTRY_THRESHOLDS = {
     "cruise":        {"queue": 50,  "processing": 300, "throughput": 10},
@@ -169,16 +182,41 @@ def describe_metric_signal(industry: str, stage: str, queue_size: float, process
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 async def call_groq(prompt: str, max_tokens: int = 500) -> str:
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-            json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens},
-        )
-        if response.status_code == 429:
-            raise HTTPException(status_code=429, detail="GROQ_RATE_LIMIT: Rate limited. Wait 60s.")
-        response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"]
+    if not GROQ_API_KEY:
+        logger.error("call_groq requested without GROQ_API_KEY configured")
+        raise HTTPException(status_code=503, detail="AI provider is not configured on the backend. Set GROQ_API_KEY on Render.")
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+                json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens},
+            )
+            if response.status_code == 429:
+                raise HTTPException(status_code=429, detail="GROQ_RATE_LIMIT: Rate limited. Wait 60s.")
+            if response.status_code in {401, 403}:
+                logger.error("Groq authentication failed with status %s", response.status_code)
+                raise HTTPException(status_code=503, detail="AI provider authentication failed. Verify GROQ_API_KEY on Render.")
+            response.raise_for_status()
+            payload = response.json()
+            choices = payload.get("choices") or []
+            if not choices:
+                logger.error("Groq returned no choices: %s", payload)
+                raise HTTPException(status_code=502, detail="AI provider returned an empty response.")
+            return choices[0]["message"]["content"]
+    except HTTPException:
+        raise
+    except httpx.TimeoutException:
+        logger.exception("Groq request timed out")
+        raise HTTPException(status_code=504, detail="AI provider timed out before completing the request.")
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code if exc.response else 502
+        logger.exception("Groq HTTP error with status %s", status_code)
+        raise HTTPException(status_code=502, detail=f"AI provider request failed with status {status_code}.")
+    except Exception:
+        logger.exception("Unexpected call_groq failure")
+        raise HTTPException(status_code=500, detail="AI analysis failed on the backend.")
 
 
 def extract_confidence(text: str) -> tuple[int, str]:
@@ -522,6 +560,7 @@ def get_workflow_events():
 @app.post("/analyze-incident/{incident_id}")
 async def analyze_incident(incident_id: str):
     safe_increment_platform_metric("incidents_analyzed")
+    logger.info("Analyze incident requested for incident_id=%s", incident_id)
     result = supabase.table("incidents").select("*").eq("id", incident_id).single().execute()
     if not result.data:
         raise HTTPException(status_code=404, detail="Incident not found")
@@ -576,7 +615,7 @@ async def analyze_incident(incident_id: str):
             industry=industry,
             health=latest_health,
         )
-    return {"incident_id": incident_id, "stage": incident.get("stage"), "severity": incident.get("severity"), "ai_analysis": analysis, "confidence_score": confidence_score, "confidence_reason": confidence_reason}
+    return {"success": True, "incident_id": incident_id, "stage": incident.get("stage"), "severity": incident.get("severity"), "ai_analysis": analysis, "confidence_score": confidence_score, "confidence_reason": confidence_reason}
 
 
 # ─── Phase 4: Outcome Tracking ────────────────────────────────────────────────
@@ -1231,6 +1270,7 @@ async def agent_decision(body: AgentDecisionRequest):
     Handle a human decision in response to an agent finding.
     The agent proposed an action — the user approved or rejected it.
     """
+    logger.info("Agent decision requested for decision_id=%s approved=%s industry=%s", body.decision_id, body.approved, body.industry)
     if not body.approved:
         return {"success": True, "decision_id": body.decision_id, "action": "skipped", "message": "User chose to skip this action."}
 
@@ -1242,6 +1282,7 @@ async def agent_decision(body: AgentDecisionRequest):
             result["action_taken"] = "playbook_generated"
             result["playbook"] = playbook
         except Exception as e:
+            logger.exception("Failed to generate playbook for decision_id=%s stage=%s industry=%s", body.decision_id, body.stage, body.industry)
             result["action_taken"] = "playbook_failed"
             result["error"] = str(e)
 
