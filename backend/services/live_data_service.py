@@ -297,6 +297,28 @@ def build_metric_event(incident: dict[str, Any], thresholds: dict[str, float]) -
     }
 
 
+def build_fallback_live_result(industry: str, error: str | None = None) -> dict[str, Any]:
+    if industry not in SUPPORTED_LIVE_INDUSTRIES:
+        return {
+            "supported": False,
+            "data_mode": "fallback",
+            "incidents": [],
+            "metric_events": [],
+            "error": error or f"Industry '{industry}' is not supported for live data.",
+            "source_systems": [],
+        }
+
+    fallback_incidents = _build_fallback_incidents(industry)
+    return {
+        "supported": True,
+        "data_mode": "fallback",
+        "incidents": fallback_incidents,
+        "metric_events": [build_metric_event(incident, DEFAULT_THRESHOLDS[industry]) for incident in fallback_incidents],
+        "error": error,
+        "source_systems": [SOURCE_SYSTEMS[industry]],
+    }
+
+
 async def fetch_live_incident_bundle(industry: str = "all") -> dict[str, Any]:
     targets = list(SUPPORTED_LIVE_INDUSTRIES) if industry == "all" else [industry]
     summary: dict[str, Any] = {}
@@ -304,14 +326,7 @@ async def fetch_live_incident_bundle(industry: str = "all") -> dict[str, Any]:
     async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
         for target in targets:
             if target not in SUPPORTED_LIVE_INDUSTRIES:
-                summary[target] = {
-                    "supported": False,
-                    "data_mode": "fallback",
-                    "incidents": [],
-                    "metric_events": [],
-                    "error": f"Industry '{target}' is not supported for live data.",
-                    "source_systems": [],
-                }
+                summary[target] = build_fallback_live_result(target, f"Industry '{target}' is not supported for live data.")
                 continue
 
             try:
@@ -326,15 +341,7 @@ async def fetch_live_incident_bundle(industry: str = "all") -> dict[str, Any]:
                 }
             except Exception as exc:
                 logger.exception("Live connector failed for %s", target)
-                fallback_incidents = _build_fallback_incidents(target)
-                summary[target] = {
-                    "supported": True,
-                    "data_mode": "fallback",
-                    "incidents": fallback_incidents,
-                    "metric_events": [build_metric_event(incident, DEFAULT_THRESHOLDS[target]) for incident in fallback_incidents],
-                    "error": str(exc),
-                    "source_systems": [SOURCE_SYSTEMS[target]],
-                }
+                summary[target] = build_fallback_live_result(target, str(exc))
 
     return {
         "requested_industry": industry,
@@ -676,9 +683,19 @@ async def fetch_airport(client: httpx.AsyncClient | None = None) -> list[dict[st
     try:
         response = await client.get("https://www.faa.gov/delays/", headers={"User-Agent": "OpsIntelligence/1.0"})
         response.raise_for_status()
+        if not response.text.strip():
+            logger.warning("FAA delays page returned empty body")
+            return []
         text_parser = _HTMLTextExtractor()
-        text_parser.feed(response.text)
+        try:
+            text_parser.feed(response.text)
+        except Exception:
+            logger.exception("Failed to parse FAA delays HTML payload")
+            return []
         page_text = text_parser.get_text()
+        if not page_text.strip():
+            logger.warning("FAA delays page produced no parseable text")
+            return []
         incidents: list[dict[str, Any]] = []
 
         section_patterns = {
@@ -710,6 +727,7 @@ async def fetch_airport(client: httpx.AsyncClient | None = None) -> list[dict[st
                 )
 
         if not matched:
+            logger.info("FAA delays page contained no recognizable airport constraints")
             return []
 
         return incidents[:8]

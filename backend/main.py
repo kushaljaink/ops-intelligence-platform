@@ -10,10 +10,11 @@ import re
 import httpx
 import io
 import csv
+import logging
 from supabase import create_client
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
-from services.live_data_service import fetch_live_incident_bundle, SUPPORTED_LIVE_INDUSTRIES
+from services.live_data_service import fetch_live_incident_bundle, SUPPORTED_LIVE_INDUSTRIES, build_fallback_live_result
 from services.metrics_service import (
     get_metrics_snapshot,
     increment_metric,
@@ -40,6 +41,7 @@ ALERT_EMAIL = os.getenv("ALERT_EMAIL", "")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
+logger = logging.getLogger(__name__)
 
 INDUSTRY_THRESHOLDS = {
     "cruise":        {"queue": 50,  "processing": 300, "throughput": 10},
@@ -263,6 +265,96 @@ def insert_live_metric_record(metric_event: dict):
         "health_score": round(health, 1),
     }).execute()
     return round(health, 1)
+
+
+def safe_increment_platform_metric(metric_name: str):
+    try:
+        increment_metric(metric_name)
+    except Exception:
+        logger.exception("Failed to increment platform metric '%s'", metric_name)
+
+
+def format_live_data_response(industry: str, results: dict, all_incidents: list, mode_counts: dict):
+    if industry == "all":
+        overall_mode = "mixed" if len({r["data_mode"] for r in results.values()}) > 1 else next(iter(results.values()))["data_mode"] if results else "fallback"
+        return {
+            "success": True,
+            "industry": "all",
+            "data_mode": overall_mode,
+            "incident_count": len(all_incidents),
+            "incidents": all_incidents,
+            "summary": {
+                "supported_live_industries": list(SUPPORTED_LIVE_INDUSTRIES),
+                "mode_counts": mode_counts,
+                "industries": results,
+            },
+        }
+
+    selected = results.get(industry, {
+        "data_mode": "fallback",
+        "incident_count": 0,
+        "metric_count": 0,
+        "stored_incident_count": 0,
+        "source_systems": [],
+        "source_system": None,
+        "error": f"Industry '{industry}' is not supported for live data.",
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "incidents": [],
+    })
+    return {
+        "success": True,
+        "industry": industry,
+        "data_mode": selected["data_mode"],
+        "incident_count": selected["incident_count"],
+        "incidents": selected["incidents"],
+        "summary": {
+            "supported_live_industries": list(SUPPORTED_LIVE_INDUSTRIES),
+            "industry_result": selected,
+        },
+    }
+
+
+def build_route_level_fallback_response(industry: str, error: str):
+    if industry == "all":
+        results = {}
+        all_incidents = []
+        mode_counts = {"live": 0, "fallback": 0}
+        for supported_industry in SUPPORTED_LIVE_INDUSTRIES:
+            fallback_result = build_fallback_live_result(supported_industry, error)
+            incidents = fallback_result["incidents"]
+            results[supported_industry] = {
+                "supported": fallback_result["supported"],
+                "data_mode": fallback_result["data_mode"],
+                "incident_count": len(incidents),
+                "metric_count": len(fallback_result["metric_events"]),
+                "stored_incident_count": 0,
+                "source_systems": fallback_result.get("source_systems", []),
+                "source_system": fallback_result.get("source_systems", [None])[0] if fallback_result.get("source_systems") else None,
+                "error": fallback_result.get("error"),
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
+                "incidents": incidents,
+            }
+            all_incidents.extend(incidents)
+            mode_counts["fallback"] += 1
+        return format_live_data_response("all", results, all_incidents, mode_counts)
+
+    fallback_result = build_fallback_live_result(industry, error)
+    incidents = fallback_result["incidents"]
+    results = {
+        industry: {
+            "supported": fallback_result["supported"],
+            "data_mode": fallback_result["data_mode"],
+            "incident_count": len(incidents),
+            "metric_count": len(fallback_result["metric_events"]),
+            "stored_incident_count": 0,
+            "source_systems": fallback_result.get("source_systems", []),
+            "source_system": fallback_result.get("source_systems", [None])[0] if fallback_result.get("source_systems") else None,
+            "error": fallback_result.get("error"),
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "incidents": incidents,
+        }
+    }
+    return format_live_data_response(industry, results, incidents, {"live": 0, "fallback": 1})
 
 
 async def send_alert_email(incident: dict):
@@ -1303,88 +1395,69 @@ def get_suggestions():
 
 @app.post("/fetch-live-data")
 async def fetch_live_data(industry: str = "all"):
-    increment_metric("live_data_refresh_calls")
-    bundle = await fetch_live_incident_bundle(industry)
-    results = {}
-    all_incidents = []
-    mode_counts = {"live": 0, "fallback": 0}
+    safe_increment_platform_metric("live_data_refresh_calls")
+    try:
+        bundle = await fetch_live_incident_bundle(industry)
+        results = {}
+        all_incidents = []
+        mode_counts = {"live": 0, "fallback": 0}
 
-    for ind, result in bundle["industries"].items():
-        incidents = result["incidents"]
-        metric_events = result["metric_events"]
-        inserted_incidents = 0
-        inserted_metrics = 0
-        fetched_at = datetime.now(timezone.utc).isoformat()
+        for ind, result in bundle.get("industries", {}).items():
+            incidents = result.get("incidents", [])
+            metric_events = result.get("metric_events", [])
+            inserted_incidents = 0
+            inserted_metrics = 0
+            fetched_at = datetime.now(timezone.utc).isoformat()
+            route_error = result.get("error")
 
-        for metric_event in metric_events:
-            insert_live_metric_record(metric_event)
-            inserted_metrics += 1
+            for metric_event in metric_events:
+                try:
+                    insert_live_metric_record(metric_event)
+                    inserted_metrics += 1
+                except Exception as exc:
+                    logger.exception("Failed to persist live metric event for %s", ind)
+                    route_error = route_error or f"Metric persistence failed: {str(exc)}"
 
-        for live_incident in incidents:
-            stored = upsert_live_incident_record(live_incident)
-            if stored:
-                inserted_incidents += 1
-                if is_elevated_severity(live_incident.get("severity", "")):
-                    await send_alert_email(stored)
-                    await send_slack_alert(
-                        stage=stored.get("stage", live_incident.get("affected_system", "")),
-                        severity="high" if live_incident.get("severity") == "critical" else live_incident.get("severity", "high"),
-                        description=stored.get("description", live_incident.get("description", "")),
-                        industry=ind,
-                    )
+            for live_incident in incidents:
+                try:
+                    stored = upsert_live_incident_record(live_incident)
+                    if stored:
+                        inserted_incidents += 1
+                        if is_elevated_severity(live_incident.get("severity", "")):
+                            try:
+                                await send_alert_email(stored)
+                                await send_slack_alert(
+                                    stage=stored.get("stage", live_incident.get("affected_system", "")),
+                                    severity="high" if live_incident.get("severity") == "critical" else live_incident.get("severity", "high"),
+                                    description=stored.get("description", live_incident.get("description", "")),
+                                    industry=ind,
+                                )
+                            except Exception:
+                                logger.exception("Failed to send live-data alert notifications for %s", ind)
+                except Exception as exc:
+                    logger.exception("Failed to persist live incident for %s", ind)
+                    route_error = route_error or f"Incident persistence failed: {str(exc)}"
 
-        mode_counts[result["data_mode"]] = mode_counts.get(result["data_mode"], 0) + 1
-        all_incidents.extend(incidents)
-        results[ind] = {
-            "supported": result["supported"],
-            "data_mode": result["data_mode"],
-            "incident_count": len(incidents),
-            "metric_count": inserted_metrics,
-            "stored_incident_count": inserted_incidents,
-            "source_systems": result.get("source_systems", []),
-            "source_system": result.get("source_systems", [None])[0],
-            "error": result.get("error"),
-            "fetched_at": fetched_at,
-            "incidents": incidents,
-        }
+            mode_counts[result.get("data_mode", "fallback")] = mode_counts.get(result.get("data_mode", "fallback"), 0) + 1
+            all_incidents.extend(incidents)
+            source_systems = result.get("source_systems", [])
+            results[ind] = {
+                "supported": result.get("supported", True),
+                "data_mode": result.get("data_mode", "fallback"),
+                "incident_count": len(incidents),
+                "metric_count": inserted_metrics,
+                "stored_incident_count": inserted_incidents,
+                "source_systems": source_systems,
+                "source_system": source_systems[0] if source_systems else None,
+                "error": route_error,
+                "fetched_at": fetched_at,
+                "incidents": incidents,
+            }
 
-    if industry == "all":
-        overall_mode = "mixed" if len({r["data_mode"] for r in results.values()}) > 1 else next(iter(results.values()))["data_mode"] if results else "fallback"
-        return {
-            "success": True,
-            "industry": "all",
-            "data_mode": overall_mode,
-            "incident_count": len(all_incidents),
-            "incidents": all_incidents,
-            "summary": {
-                "supported_live_industries": list(SUPPORTED_LIVE_INDUSTRIES),
-                "mode_counts": mode_counts,
-                "industries": results,
-            },
-        }
-
-    selected = results.get(industry, {
-        "data_mode": "fallback",
-        "incident_count": 0,
-        "metric_count": 0,
-        "stored_incident_count": 0,
-        "source_systems": [],
-        "source_system": None,
-        "error": f"Industry '{industry}' is not supported for live data.",
-        "fetched_at": datetime.now(timezone.utc).isoformat(),
-        "incidents": [],
-    })
-    return {
-        "success": True,
-        "industry": industry,
-        "data_mode": selected["data_mode"],
-        "incident_count": selected["incident_count"],
-        "incidents": selected["incidents"],
-        "summary": {
-            "supported_live_industries": list(SUPPORTED_LIVE_INDUSTRIES),
-            "industry_result": selected,
-        },
-    }
+        return format_live_data_response(industry, results, all_incidents, mode_counts)
+    except Exception as exc:
+        logger.exception("Unhandled fetch-live-data failure for industry=%s", industry)
+        return build_route_level_fallback_response(industry, str(exc))
 
 
 @app.get("/connect-info")
