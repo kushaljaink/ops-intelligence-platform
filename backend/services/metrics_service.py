@@ -15,6 +15,7 @@ CORE_METRIC_NAMES = (
     "live_data_refresh_calls",
     "industries_explored",
 )
+FALLBACK_METRICS_INDUSTRY = "__platform_metrics__"
 
 
 def _get_supabase() -> Client:
@@ -33,6 +34,72 @@ def _log_metrics_error(action: str, error: Exception, metric_name: str | None = 
     logger.exception("Platform metrics %s failed%s", action, metric_hint)
     if _is_missing_table_error(error):
         logger.error("The 'platform_metrics' table appears to be missing. Apply platform_metrics.sql in Supabase.")
+
+
+def _get_fallback_metric_value(metric_name: str, initial_value: int = 0) -> int:
+    supabase = _get_supabase()
+    response = (
+        supabase.table("workflow_metrics")
+        .select("queue_size")
+        .eq("industry", FALLBACK_METRICS_INDUSTRY)
+        .eq("stage", metric_name)
+        .order("recorded_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    if response.data:
+        return int(response.data[0].get("queue_size", initial_value) or initial_value)
+    return initial_value
+
+
+def _set_fallback_metric_value(metric_name: str, value: int) -> int:
+    supabase = _get_supabase()
+    safe_value = max(0, value)
+    existing = (
+        supabase.table("workflow_metrics")
+        .select("stage")
+        .eq("industry", FALLBACK_METRICS_INDUSTRY)
+        .eq("stage", metric_name)
+        .limit(1)
+        .execute()
+    )
+    payload = {
+        "industry": FALLBACK_METRICS_INDUSTRY,
+        "stage": metric_name,
+        "queue_size": safe_value,
+        "processing_time_seconds": 0,
+        "throughput": 0,
+        "health_score": min(100, safe_value),
+    }
+    if existing.data:
+        (
+            supabase.table("workflow_metrics")
+            .update(payload)
+            .eq("industry", FALLBACK_METRICS_INDUSTRY)
+            .eq("stage", metric_name)
+            .execute()
+        )
+    else:
+        supabase.table("workflow_metrics").insert(payload).execute()
+    return safe_value
+
+
+def _get_fallback_metric_map() -> dict[str, int]:
+    supabase = _get_supabase()
+    response = (
+        supabase.table("workflow_metrics")
+        .select("stage, queue_size, recorded_at")
+        .eq("industry", FALLBACK_METRICS_INDUSTRY)
+        .order("recorded_at", desc=True)
+        .execute()
+    )
+    metric_map: dict[str, int] = {}
+    for row in response.data or []:
+        stage = row.get("stage")
+        if not stage or stage in metric_map:
+            continue
+        metric_map[stage] = int(row.get("queue_size", 0) or 0)
+    return metric_map
 
 
 def _upsert_metric(metric_name: str, metric_value: int) -> None:
@@ -63,6 +130,8 @@ def _ensure_metric(metric_name: str, initial_value: int = 0) -> int:
         return initial_value
     except Exception as error:
         _log_metrics_error("ensure", error, metric_name)
+        if _is_missing_table_error(error):
+            return _set_fallback_metric_value(metric_name, _get_fallback_metric_value(metric_name, initial_value))
         raise
 
 
@@ -78,6 +147,9 @@ def increment_metric(metric_name: str, amount: int = 1) -> int:
         return new_value
     except Exception as error:
         _log_metrics_error("increment", error, metric_name)
+        if _is_missing_table_error(error):
+            current_value = _get_fallback_metric_value(metric_name, 0)
+            return _set_fallback_metric_value(metric_name, current_value + amount)
         raise
 
 
@@ -93,6 +165,8 @@ def set_metric(metric_name: str, value: int) -> int:
         return safe_value
     except Exception as error:
         _log_metrics_error("set", error, metric_name)
+        if _is_missing_table_error(error):
+            return _set_fallback_metric_value(metric_name, value)
         raise
 
 
@@ -138,7 +212,12 @@ def get_metrics_snapshot() -> dict:
         metric_map = {row["metric_name"]: int(row.get("metric_value", 0) or 0) for row in rows}
     except Exception as error:
         _log_metrics_error("snapshot", error)
-        raise
+        if _is_missing_table_error(error):
+            for metric_name in (*CORE_METRIC_NAMES, _today_metric_name()):
+                _set_fallback_metric_value(metric_name, _get_fallback_metric_value(metric_name, 0))
+            metric_map = _get_fallback_metric_map()
+        else:
+            raise
 
     top_industries = []
     for metric_name, metric_value in metric_map.items():
