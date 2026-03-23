@@ -178,6 +178,37 @@ An autonomous agent built on Groq's native tool-calling API investigates the ope
 
 ---
 
+## Architecture Overview
+
+- **Frontend:** Next.js dashboard deployed on Vercel for the live UI, authentication flows, analytics cards, and operational controls
+- **Backend:** FastAPI service deployed on Render for incident APIs, AI execution, live data refresh, and telemetry tracking
+- **Database:** Supabase PostgreSQL stores incidents, workflow metrics, analysis history, outcomes, suggestions, API keys, and persistent platform usage counters
+- **AI Engine:** Groq powers grounded incident analysis, custom data analysis, playbook generation, and the autonomous investigation agent
+- **Telemetry:** platform usage counters persist in Supabase across backend redeployments and continue operating in fallback storage mode if a dedicated `platform_metrics` table is unavailable
+- **Live Data:** industry connectors for healthcare, airport, energy, water, and weather support graceful fallback behavior when a public source is unavailable
+
+---
+
+## Platform Telemetry
+
+The dashboard includes public platform telemetry cards backed by persistent Supabase storage rather than in-memory counters, so usage data survives backend restarts and redeployments.
+
+Tracked metrics include:
+
+- total visitors
+- active sessions
+- incidents analyzed
+- agent investigations executed
+- webhook events received
+- live data refresh calls
+- industries explored
+
+Industry selection frequency is also recorded as per-industry counters and surfaced in the analytics panel as the top industries explored.
+
+If a dedicated `platform_metrics` table is unavailable, the backend continues serving telemetry through fallback storage behavior in Supabase so the analytics panel does not depend on ephemeral process state.
+
+---
+
 ## API Reference
 
 ### Core
@@ -211,6 +242,14 @@ An autonomous agent built on Groq's native tool-calling API investigates the ope
 | POST | `/agent/investigate` | Run autonomous AI agent investigation |
 | POST | `/agent/decision` | Submit human decision on agent finding |
 
+### Platform Telemetry
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/platform-metrics` | Return the current persistent platform usage snapshot for the analytics panel |
+| POST | `/platform-metrics/session-start` | Increment visitor and active-session counters when a dashboard session begins |
+| POST | `/platform-metrics/session-end` | Decrement active-session count when a dashboard session ends |
+| POST | `/platform-metrics/industry-selection` | Record which industry a user explored so frequency can be surfaced in analytics |
+
 ### Data Ingestion
 | Method | Endpoint | Description |
 |---|---|---|
@@ -239,7 +278,33 @@ incident_outcomes   -- Logged resolution actions and health before/after
 recommendations     -- Static recommendations per incident
 suggestions         -- Community improvement suggestions
 user_api_keys       -- Personal API keys for webhook authentication
+platform_metrics    -- Optional dedicated persistent usage counters for dashboard telemetry
 ```
+
+---
+
+## Autonomous Investigation Agent
+
+The investigation agent is designed as an approval-gated operational copilot rather than a one-shot chat response.
+
+- **Multi-step reasoning loop:** the backend runs a structured investigation sequence instead of asking the model for one generic answer
+- **Tool execution pipeline:** the agent can call health score, open incident, cascade prediction, ETA-to-breach, and recurring pattern tools in sequence
+- **Supabase historical queries:** each tool is grounded in stored incident and metric history so investigations use actual operational context
+- **Cascade prediction logic:** the agent incorporates deterministic stage-to-stage degradation signals and historical failure relationships before recommending action
+- **Decision-point generation:** after synthesizing findings, the backend creates explicit decision points for actions that require human review
+- **Approval-gated recommendations:** the agent never executes consequential actions automatically; users must approve or skip each surfaced decision
+
+Structured investigation responses include:
+
+- `success`
+- `industry`
+- `goal`
+- `steps`
+- `output`
+- `decision_points`
+- `investigated_at`
+
+That response shape lets the frontend render tool-by-tool progress, final findings, and approval decisions without changing the underlying backend contract.
 
 ---
 
@@ -247,42 +312,73 @@ user_api_keys       -- Personal API keys for webhook authentication
 
 **Prerequisites:** Python 3.11+, Node.js 20+, Supabase account, Groq API key (free at console.groq.com)
 
+1. Clone the repository and move into the project root.
+
 ```bash
-# Clone
 git clone https://github.com/kushaljaink/ops-intelligence-platform
 cd ops-intelligence-platform
-
-# Backend
-cd backend
-python -m venv venv
-venv\Scripts\activate          # Windows
-pip install -r requirements.txt
-
-# backend/.env
-SUPABASE_URL=your_project_url
-SUPABASE_KEY=your_service_role_key
-GROQ_API_KEY=your_groq_key
-SUPABASE_JWT_SECRET=your_jwt_secret
-EIA_API_KEY=your_free_eia_key
-USGS_API_KEY=optional_higher_volume_key
-NOAA_USER_AGENT=OpsIntelligence/1.0 (your-email@example.com)
-FAA_ENABLED=true
-SLACK_WEBHOOK_URL=optional
-
-uvicorn main:app --reload      # http://localhost:8000
-
-# Frontend (new terminal)
-cd frontend
-npm install
-
-# frontend/.env.local
-NEXT_PUBLIC_SUPABASE_URL=your_project_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
-
-npm run dev                    # http://localhost:3000
 ```
 
+2. Start the backend.
+
+```bash
+cd backend
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn main:app --reload
+```
+
+3. In a new terminal, start the frontend.
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+4. Create `frontend/.env.local`.
+
+```env
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
+
+5. Verify the local apps.
+
+- Backend docs: `http://localhost:8000/docs`
+- Frontend: `http://localhost:3000`
+
 For live connector testing, the dashboard currently supports `healthcare`, `airport`, `energy`, `water`, and `weather`. Other industries continue to use seeded demo incidents and the existing intelligence pipeline.
+
+---
+
+## Environment Variables
+
+### Backend (`backend/.env`)
+
+```env
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+GROQ_API_KEY=
+```
+
+- `SUPABASE_URL` points the backend to the Supabase project used for incidents, workflow metrics, auth-backed data, suggestions, and telemetry.
+- `SUPABASE_SERVICE_ROLE_KEY` is the Supabase service-role credential used for server-side reads and writes.
+- `GROQ_API_KEY` authenticates the backend to Groq for incident analysis, investigation runs, playbook generation, and custom data analysis.
+
+Implementation note: the current backend code reads the Supabase service-role credential from `SUPABASE_KEY`, so set that value in `backend/.env` even if your secret manager labels it as a service-role key.
+
+Additional backend variables used in production include `SUPABASE_JWT_SECRET`, `EIA_API_KEY`, `USGS_API_KEY`, `NOAA_USER_AGENT`, `FAA_ENABLED`, `SLACK_WEBHOOK_URL`, `RESEND_API_KEY`, `ALERT_EMAIL`, and `WEBHOOK_SECRET`.
+
+### Frontend (`frontend/.env.local`)
+
+```env
+NEXT_PUBLIC_API_URL=
+```
+
+- `NEXT_PUBLIC_API_URL` tells the Next.js app which backend to call for incidents, analytics, AI actions, live refresh, and investigation workflows.
+
+The current frontend also uses `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` for client-side authentication.
 
 ---
 
