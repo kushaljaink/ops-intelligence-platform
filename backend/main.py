@@ -1028,14 +1028,20 @@ class AgentDecisionRequest(BaseModel):
 async def agent_investigate(body: AgentInvestigateRequest):
     safe_increment_platform_metric("agent_investigations")
     industry = body.industry
+    logger.info("Agent investigation requested for industry=%s goal_provided=%s", industry, bool(body.goal))
 
     try:
+        def run_agent_job():
+            thread_supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+            return run_investigation(
+                thread_supabase,
+                GROQ_API_KEY,
+                industry,
+                body.goal or "",
+            )
+
         result = await asyncio.to_thread(
-            run_investigation,
-            supabase,
-            GROQ_API_KEY,
-            industry,
-            body.goal or "",
+            run_agent_job,
         )
     except Exception:
         logger.exception("Unexpected agent route failure for industry=%s", industry)
@@ -1057,6 +1063,8 @@ async def agent_investigate(body: AgentInvestigateRequest):
             result.get("reason"),
             result.get("error"),
         )
+    else:
+        logger.info("Agent investigation succeeded for industry=%s steps=%s", industry, len(result.get("steps", [])))
 
     return result
 
