@@ -27,7 +27,7 @@ Frontend: https://ops-intelligence-platform.vercel.app
 Backend API: https://ops-intelligence-platform.onrender.com/docs
 GitHub: https://github.com/kushaljaink/ops-intelligence-platform
 
-> Backend runs on Render's free tier and spins down after 15 minutes of inactivity. The first request may take 30-50 seconds. Visit `/health` to wake it up before a demo.
+> Backend runs on Render's free tier and spins down after 15 minutes of inactivity. The first request may take 30-50 seconds. Visit [https://ops-intelligence-platform.onrender.com/health](https://ops-intelligence-platform.onrender.com/health) to wake it up before a demo.
 
 ---
 
@@ -59,7 +59,7 @@ GitHub: https://github.com/kushaljaink/ops-intelligence-platform
 
 ## Supported Industries
 
-8 industries with calibrated thresholds, 30 days of seeded historical data, realistic patterns, and industry-specific AI analysis:
+9 industries with calibrated thresholds, 30 days of seeded historical data, realistic patterns, and industry-specific AI analysis:
 
 Five industries also support live public-source refresh in the dashboard: `healthcare`, `airport`, `energy`, `water`, and `weather`. These appear as Hybrid views in the UI because they can show either live incidents or fallback demo scenarios without changing the rest of the product experience.
 
@@ -116,7 +116,7 @@ An autonomous agent built on Groq's native tool-calling API investigates the ope
 
 ### Authentication & User Data Isolation
 - Email/password signup via Supabase Auth
-- Unauthenticated visitors see demo data only
+- Visitors can explore both seeded demo scenarios and live public-source operational data depending on the selected industry.
 - Signed-in users see demo data + their own private operational data
 - Personal API keys generated on signup for webhook authentication
 
